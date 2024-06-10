@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+option go_package = "dfs/contract/contract";
+
+package contract;
+
+service DFS {
+
+    rpc StoreFile(stream StoreRequest) returns (MetaData) {}
+
+    rpc FetchFile(MetaData) returns (stream FetchResponse) {}
+
+    rpc ListFiles(MetaData) returns (ListResponse) {}
+
+    rpc GetFileStat(MetaData) returns (MetaData) {}
+
+    rpc LockFile(MetaData) returns (MetaData) {}
+
+    rpc CallbackList(MetaData) returns (ListResponse) {}
+
+    rpc DeleteFile(MetaData) returns (MetaData) {}
+}
+
+message MetaData {
+    string name = 1;
+    uint32 size = 2;
+    uint32 mtime = 3;
+    uint32 ctime = 4;
+    string lockOwner = 5;
+    uint32 crc = 6;
+}
+
+message FileData {
+    bytes content = 1;
+    uint32 size = 2;
+} 
+
+message StoreRequest {
+    oneof requestData {
+        MetaData metadata = 1;
+        FileData filedata = 2;
+    }
+}
+
+message FetchResponse {
+    oneof responseData {
+        MetaData metadata = 1;
+        FileData filedata = 2;
+    }
+}
+
+message ListResponse {
+    repeated MetaData fileList = 2;
+}
