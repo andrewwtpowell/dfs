@@ -25,7 +25,6 @@ message MetaData {
     string name = 1;
     uint32 size = 2;
     uint32 mtime = 3;
-    uint32 ctime = 4;
     string lockOwner = 5;
     uint32 crc = 6;
 }
