@@ -67,10 +67,10 @@ func RefreshFileList(mountDir string) ([]pb.MetaData, error) {
     return fileList, nil
 }
 
-func PrintFileList(list []pb.MetaData) {
+func PrintFileList(list *[]pb.MetaData) {
 
     log.Print("mounted files include:")
-    for _, data := range list {
+    for _, data := range *list {
         fmt.Printf("%v\n", data.Name)
         fmt.Printf("size:\t%v\n", data.Size)
         fmt.Printf("mtime:\t%v\n", data.Mtime)
