@@ -37,7 +37,7 @@ func main() {
         log.Fatalf("RefreshFileList: %s", err)
     }
 
-    shared.PrintFileList(fileList)
+    shared.PrintFileList(&fileList)
 
     // Connect to server
     log.Printf("connecting to server at %s", *target)
