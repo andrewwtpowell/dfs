@@ -1,19 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"os"
-	"slices"
 	"sync"
 
 	pb "github.com/andrewwtpowell/dfs/contract"
 	"github.com/andrewwtpowell/dfs/shared"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 var (
@@ -23,7 +23,7 @@ var (
 
 type dfsServer struct {
     pb.UnimplementedDFSServer
-    fileList    []pb.MetaData
+    fileList    []*pb.MetaData
     mount       string
     queueMutex  sync.Mutex
     dataMutex   sync.Mutex
@@ -186,4 +186,41 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 
         log.Printf("Wrote %d bytes to file %s", bytes, metadata.GetName())
     }
+}
+
+func (s *dfsServer) ListFiles(ctx context.Context, request *pb.MetaData) (*pb.ListResponse, error) {
+
+    s.dataMutex.Lock()
+    defer s.dataMutex.Unlock()
+
+    var response pb.ListResponse
+    copy(response.FileList, s.fileList)
+
+    return &response, nil
+}
+
+func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+
+    s.dataMutex.Lock()
+    defer s.dataMutex.Unlock()
+
+    defer shared.RefreshFileList(s.mount)
+
+    // If file is locked return error, otherwise lock the file
+    if s.lockMap[request.GetName()] != request.GetLockOwner() &&
+        s.lockMap[request.GetName()] != "" {
+        return nil, fmt.Errorf("File %s locked by client %s", request.GetName(), s.lockMap[request.GetName()])
+    }
+
+    // Check server list for file
+    for _, file := range s.fileList {
+
+        if(request.GetName() == file.Name) {
+            os.Remove(request.GetName())
+            delete(s.lockMap, request.GetName())
+            return file, nil
+        }
+    }
+
+    return nil, fmt.Errorf("File not found")
 }

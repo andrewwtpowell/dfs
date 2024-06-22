@@ -9,15 +9,12 @@ import (
 	pb "github.com/andrewwtpowell/dfs/contract"
 )
 
-func RefreshFileList(mountDir string) ([]pb.MetaData, error) {
+func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
 
     err := os.MkdirAll(mountDir, os.ModePerm)
     if err != nil {
         log.Fatalf("creating dir %s failed: %s", mountDir, err)
     }
-
-    // Clear existing list, replaced by current mount dir contents
-    var fileList []pb.MetaData
 
     files, err := os.ReadDir(mountDir)
     if err != nil {
@@ -25,7 +22,7 @@ func RefreshFileList(mountDir string) ([]pb.MetaData, error) {
     }
 
     // Allocate capacity for new list based on number of files in dir
-    fileList = make([]pb.MetaData, 0, len(files))
+    fileList := make([]*pb.MetaData, 0, len(files))
 
     for _, file := range files {
 
@@ -61,13 +58,13 @@ func RefreshFileList(mountDir string) ([]pb.MetaData, error) {
 
         newFileEntry.Crc = crc32.Checksum(fileContents, crc32.IEEETable)
 
-        fileList = append(fileList, newFileEntry)
+        fileList = append(fileList, &newFileEntry)
     }
 
     return fileList, nil
 }
 
-func PrintFileList(list *[]pb.MetaData) {
+func PrintFileList(list *[]*pb.MetaData) {
 
     log.Print("mounted files include:")
     for _, data := range *list {
