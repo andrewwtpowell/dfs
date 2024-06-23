@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"net"
 	"os"
 	"sync"
@@ -34,7 +33,7 @@ func main() {
 
     flag.Parse()
 
-    listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+    listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
     if err != nil {
         log.Fatalf("failed to listen: %v", err)
     }

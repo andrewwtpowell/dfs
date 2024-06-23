@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -17,16 +16,17 @@ import (
 const deadlineTimeout = 7
 
 var (
-    server = flag.String("server", "localhost:50051", "Server to connect to in the format ip:port")
-    mountPath = flag.String("mount", "mnt/", "Server directory to mount")
-    rpc = flag.String("rpc", "list", "rpc to call (list, store, stat, delete, fetch)")
+    server = os.Getenv("DFS_SERVER_ADDR")
     fileList []pb.MetaData
     id string
 )
 
 func main() {
 
-    flag.Parse()
+    if server == "" {
+        server = "localhost:50051"
+        log.Printf("DFS_SERVER_ADDR env var not set. Using default: %s", server)
+    }
 
     name, err := os.Hostname()
     if err != nil {
@@ -36,8 +36,13 @@ func main() {
     id = name + fmt.Sprint(pid)
     log.Printf("starting client %s", id)
 
-    // Get files at mount point
-    fileList, err := shared.RefreshFileList(*mountPath)
+    // Refresh client file list
+    clientDir, err := os.Getwd()
+    if err != nil {
+        log.Fatalf("os.Getwd failed: %s", err)
+    }
+
+    fileList, err := shared.RefreshFileList(clientDir + "/mnt/")
     if err != nil {
         log.Fatalf("RefreshFileList: %s", err)
     }
@@ -45,17 +50,34 @@ func main() {
     shared.PrintFileList(&fileList)
 
     // Connect to server
-    log.Printf("connecting to server at %s", *server)
-    conn, err := grpc.NewClient(*server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+    log.Printf("connecting to server at %s", server)
+    conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
     if err != nil {
         log.Fatalf("unable to connect: %s", err)
     }
     defer conn.Close()
+    client := pb.NewDFSClient(conn)
 
-    //client := pb.NewDFSClient(conn)
+    if len(os.Args) < 2 {
+        log.Fatal("Expected subcommand. Subcommand options are list, store, stat, delete, or fetch.")
+    }
 
-    // Send request to server
-
+    switch os.Args[1] {
+    case "list":
+        list(client)
+    case "store":
+    case "stat":
+        filename := os.Args[2]
+        if filename == "" {
+            log.Fatalf("No file name provided for stat RPC")
+        }
+        log.Printf("Calling stat RPC with file name %s", filename)
+        stat(client, filename)
+    case "delete":
+    case "fetch":
+    default:
+        log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
+    }
 }
 
 // list gets files present on the server and prints them to stdout
