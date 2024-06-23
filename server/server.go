@@ -224,3 +224,28 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 
     return nil, fmt.Errorf("File not found")
 }
+
+func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+
+    log.Printf("Client %s requesting info for file %s", request.GetLockOwner(), request.GetName())
+    s.dataMutex.Lock()
+    defer s.dataMutex.Unlock()
+
+    for _, file := range s.fileList {
+
+        if file.GetName() == request.GetName() {
+            response := &pb.MetaData{
+                Name:       file.GetName(),
+                Size:       file.GetSize(),
+                Mtime:      file.GetMtime(),
+                LockOwner:  s.lockMap[file.GetName()],
+                Crc:        file.GetCrc(),
+            }
+            log.Printf("Found file %+v", *response)
+
+            return response, nil
+        }
+    }
+
+    return nil, fmt.Errorf("File not found")
+}
