@@ -189,12 +189,16 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 
 func (s *dfsServer) ListFiles(ctx context.Context, request *pb.MetaData) (*pb.ListResponse, error) {
 
+    log.Printf("Received request for file list")
+
     s.dataMutex.Lock()
     defer s.dataMutex.Unlock()
 
+    log.Printf("File list contains %d files", len(s.fileList))
     var response pb.ListResponse
-    copy(response.FileList, s.fileList)
+    response.FileList = s.fileList
 
+    log.Printf("Response list contains %d files", len(response.FileList))
     return &response, nil
 }
 

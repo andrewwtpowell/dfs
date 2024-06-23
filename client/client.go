@@ -93,6 +93,7 @@ func list(client pb.DFSClient) {
         log.Fatalf("client.ListFiles failed: %s", err)
     }
 
+    log.Printf("Received list containing %d files", len(list.FileList))
     for _, file := range list.FileList {
         log.Printf("%s", file.GetName())
     }
