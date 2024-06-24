@@ -71,8 +71,7 @@ func main() {
         if filename == "" {
             log.Fatalf("No file name provided for stat RPC")
         }
-        log.Printf("Calling stat RPC with file name %s", filename)
-        stat(client, filename)
+        stat(client, &filename)
     case "delete":
     case "fetch":
     default:
@@ -100,21 +99,96 @@ func list(client pb.DFSClient) {
 }
 
 // stat gets file statistics for a server-side file
-func stat(client pb.DFSClient, filename string) {
+func stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
 
     log.Printf("Requesting statistics for file %s", filename)
     ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
     defer cancel()
 
     request := pb.MetaData{
-        Name: filename,
+        Name: *filename,
         LockOwner: id,
     }
 
     fileStat, err := client.GetFileStat(ctx, &request)
     if err != nil {
-        log.Fatalf("client.GetFileStat failed: %s", err)
+        return nil, fmt.Errorf("client.GetFileStat failed: %s", err)
     }
 
     shared.PrintFileInfo(fileStat)
+
+    return fileStat, nil
+}
+
+// lock attempts to lock a dfs file for editing
+func lock(client pb.DFSClient, filename *string) error {
+
+    log.Printf("Attempting to lock file %s", *filename)
+    ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
+    defer cancel()
+
+    request := pb.MetaData{
+        Name: *filename,
+        LockOwner: id,
+    }
+
+    response, err := client.LockFile(ctx, &request)
+    if err != nil {
+        return fmt.Errorf("client.LockFile failed: %s", err)
+    }
+
+    if response.LockOwner == id { 
+        log.Printf("%s locked successfully")
+    }
+
+    return nil
+}
+
+// store stores a client file to the dfs server
+func store(client pb.DFSClient, filename *string) {
+
+    log.Printf("Attempting to store file %s", *filename)
+    ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
+    defer cancel()
+
+    // Get local file data
+    info, err := os.Stat(*filename)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Lock file
+    if err := lock(client, filename); err != nil {
+        log.Fatal(err)
+    }
+
+    // Calculate client side file crc
+    crc, err := shared.CalculateCrc(filename)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Determine if client has newer version of file
+    serverFileStat, err := stat(client, filename) 
+    if err != "File not found" {
+        log.Fatal(err)
+    }
+
+    if err == nil && serverFileStat.Crc == crc {
+        log.Fatalf("Client and Server have same file contents. Exiting.")
+    }
+
+    if err == nil && serverFileStat.Mtime > uint32(info.ModTime().Unix()) {
+        log.Fatalf("Server has more recent version of file than client. Exiting.")
+    }
+
+    // Initialize request
+    request := pb.MetaData{
+        Name: *filename,
+        Size: uint32(info.Size()),
+        Mtime: uint32(info.ModTime().Unix()),
+        Crc: crc,
+        LockOwner: id,
+    }
+
 }

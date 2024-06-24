@@ -253,3 +253,25 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
 
     return nil, fmt.Errorf("File not found")
 }
+
+func (s *dfsServer) LockFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+
+    log.Printf("Client %s attempting to lock file %s", request.GetLockOwner(), request.GetName())
+    
+    if request.GetLockOwner() == "" {
+        return nil, fmt.Errorf("No client ID supplied in lock request")
+    }
+
+    if s.lockMap[request.GetName()] == "" {
+        s.lockMap[request.Name] = request.LockOwner
+        log.Printf("Client %s locked file %s", request.GetLockOwner(), request.GetName())
+        return request, nil
+    } 
+
+    if s.lockMap[request.Name] == request.LockOwner {
+        log.Printf("Client %s already owns lock for file %s", request.LockOwner, request.Name)
+        return request, nil
+    } 
+
+    return nil, fmt.Errorf("File %s not available. Locked by client %s", request.Name, s.lockMap[request.Name])
+}

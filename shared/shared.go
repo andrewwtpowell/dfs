@@ -45,18 +45,11 @@ func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
         newFileEntry.Size = uint32(fileInfo.Size())
         newFileEntry.Mtime = uint32(fileInfo.ModTime().Unix())
 
-        openedFile, err := os.Open(filePath)
+        crc, err := CalculateCrc(&filePath)
         if err != nil {
-            return nil, fmt.Errorf("failed to open file %s: %s\n", filePath, err)
+            return nil, fmt.Errorf("CalculateCrc failed: %s", err)
         }
-        defer openedFile.Close()
-
-        fileContents, err := os.ReadFile(filePath)
-        if err != nil {
-            return nil, fmt.Errorf("unable to read contents of %s: %s\n", filePath, err)
-        }
-
-        newFileEntry.Crc = crc32.Checksum(fileContents, crc32.IEEETable)
+        newFileEntry.Crc = crc
 
         fileList = append(fileList, &newFileEntry)
     }
@@ -75,4 +68,15 @@ func PrintFileInfo(data *pb.MetaData) {
     fmt.Printf("size:\t%v\n", data.Size)
     fmt.Printf("mtime:\t%v\n", data.Mtime)
     fmt.Printf("crc:\t%v\n", data.Crc)
+}
+
+func CalculateCrc(filename *string) (uint32, error) {
+
+    contents, err := os.ReadFile(*filename)
+    if err != nil {
+        return 0, fmt.Errorf("unable to read contents of %s: %s\n", *filename, err)
+    }
+
+    crc := crc32.Checksum(contents, crc32.IEEETable)
+    return crc, nil
 }
