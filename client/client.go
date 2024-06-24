@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -170,8 +172,10 @@ func store(client pb.DFSClient, filename *string) {
 
     // Determine if client has newer version of file
     serverFileStat, err := stat(client, filename) 
-    if err != "File not found" {
-        log.Fatal(err)
+    if _, ok := err.(shared.FileNotFoundError); ok {
+        log.Printf("Caught file not found error: %s", err.Error())
+    } else if err != nil {
+        log.Fatalf("stat failed: %s", err)
     }
 
     if err == nil && serverFileStat.Crc == crc {
@@ -183,12 +187,73 @@ func store(client pb.DFSClient, filename *string) {
     }
 
     // Initialize request
-    request := pb.MetaData{
+    metadata := pb.MetaData{
         Name: *filename,
-        Size: uint32(info.Size()),
-        Mtime: uint32(info.ModTime().Unix()),
+        Size: int(info.Size()),
+        Mtime: int(info.ModTime().Unix()),
         Crc: crc,
         LockOwner: id,
     }
+    request := pb.StoreRequest_Metadata{
+        Metadata: &metadata,
+    }
+    msg := &pb.StoreRequest{RequestData: &request}
 
+    stream, err := client.StoreFile(ctx)
+    if err != nil {
+        log.Fatalf("client.StoreFile failed: %s", err)
+    }
+
+    // Send metadata as inital request in stream
+    stream.Send(msg)
+
+    var bufSize int
+    if int(info.Size()) > shared.MaxBufSize {
+        bufSize = shared.MaxBufSize
+    } else {
+        bufSize = int(info.Size())
+    }
+
+    file, err := os.Open(*filename)
+    defer file.Close()
+    if err != nil {
+        log.Fatalf("os.Open failed: %s", err) 
+    }
+    buf := make([]byte, bufSize)
+
+    for {
+
+        numBytes, readErr := file.Read(buf)
+        if readErr != nil && readErr != io.EOF {
+            log.Fatalf("file.Read failed: %s", readErr)
+        }
+
+        filedata := pb.FileData {
+            Content: buf,
+            Size: numBytes,
+        }
+        request := pb.StoreRequest_Filedata{
+            Filedata: &filedata,
+        }
+        msg := &pb.StoreRequest{RequestData: &request}
+        if err := stream.Send(msg); err != nil {
+            log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", msg, err)
+        }
+
+        if readErr == io.EOF {
+            break
+        } 
+    }
+
+    response, err := stream.CloseAndRecv()
+    if err != nil {
+        log.Fatalf("StoreFile failed: %s", err)
+    }
+
+    log.Print("Received StoreFile response from server: ")
+    shared.PrintFileInfo(response)
+
+    if crc != response.Crc {
+        log.Fatalf("Client/Server CRC mismatch. Client CRC: %d, Server CRC: %d", crc, response.Crc)
+    }
 }

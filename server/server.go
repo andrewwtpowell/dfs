@@ -225,7 +225,8 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
         }
     }
 
-    return nil, fmt.Errorf("File not found")
+    fnf := shared.FileNotFoundError(request.GetName())
+    return nil, fnf
 }
 
 func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
@@ -251,7 +252,8 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
         }
     }
 
-    return nil, fmt.Errorf("File not found")
+    fnf := shared.FileNotFoundError(request.GetName())
+    return nil, fnf
 }
 
 func (s *dfsServer) LockFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {

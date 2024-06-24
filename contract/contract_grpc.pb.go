@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v4.25.1
-// source: contract.proto
+// source: contract/contract.proto
 
 package contract
 
@@ -379,5 +379,5 @@ var DFS_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "contract.proto",
+	Metadata: "contract/contract.proto",
 }

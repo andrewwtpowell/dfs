@@ -9,6 +9,10 @@ import (
 	pb "github.com/andrewwtpowell/dfs/contract"
 )
 
+const (
+    MaxBufSize = 4190000
+)
+
 func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
 
     err := os.MkdirAll(mountDir, os.ModePerm)
@@ -79,4 +83,10 @@ func CalculateCrc(filename *string) (uint32, error) {
 
     crc := crc32.Checksum(contents, crc32.IEEETable)
     return crc, nil
+}
+
+type FileNotFoundError string
+
+func (e FileNotFoundError) Error() string {
+    return fmt.Sprintf("File %s not found", string(e))
 }
