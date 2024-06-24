@@ -237,6 +237,7 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
     for _, file := range s.fileList {
 
         if file.GetName() == request.GetName() {
+            log.Printf("Found file %s", request.GetName())
             response := &pb.MetaData{
                 Name:       file.GetName(),
                 Size:       file.GetSize(),
@@ -244,7 +245,7 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
                 LockOwner:  s.lockMap[file.GetName()],
                 Crc:        file.GetCrc(),
             }
-            log.Printf("Found file %+v", *response)
+            shared.PrintFileInfo(response)
 
             return response, nil
         }

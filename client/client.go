@@ -116,6 +116,5 @@ func stat(client pb.DFSClient, filename string) {
         log.Fatalf("client.GetFileStat failed: %s", err)
     }
 
-    log.Printf("%+v", *fileStat)
-
+    shared.PrintFileInfo(fileStat)
 }
