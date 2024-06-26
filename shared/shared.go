@@ -46,8 +46,8 @@ func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
             return nil, fmt.Errorf("unable to get info for directory %s: %s", mountDir, err)
         }
 
-        newFileEntry.Size = uint32(fileInfo.Size())
-        newFileEntry.Mtime = uint32(fileInfo.ModTime().Unix())
+        newFileEntry.Size = int32(fileInfo.Size())
+        newFileEntry.Mtime = int32(fileInfo.ModTime().Unix())
 
         crc, err := CalculateCrc(&filePath)
         if err != nil {

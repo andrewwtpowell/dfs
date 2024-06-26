@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,7 +11,9 @@ import (
 	pb "github.com/andrewwtpowell/dfs/contract"
 	"github.com/andrewwtpowell/dfs/shared"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const deadlineTimeout = 7
@@ -68,6 +69,11 @@ func main() {
     case "list":
         list(client)
     case "store":
+        filename := os.Args[2]
+        if filename == "" {
+            log.Fatal("No file name provided for store RPC")
+        }
+        store(client, &filename)
     case "stat":
         filename := os.Args[2]
         if filename == "" {
@@ -84,7 +90,7 @@ func main() {
 // list gets files present on the server and prints them to stdout
 func list(client pb.DFSClient) {
 
-    log.Printf("Requesting list of server-side files")
+    log.Print("Requesting list of server-side files")
     ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
     defer cancel()
 
@@ -103,7 +109,7 @@ func list(client pb.DFSClient) {
 // stat gets file statistics for a server-side file
 func stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
 
-    log.Printf("Requesting statistics for file %s", filename)
+    log.Printf("Requesting statistics for file %s", *filename)
     ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
     defer cancel()
 
@@ -113,9 +119,11 @@ func stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
     }
 
     fileStat, err := client.GetFileStat(ctx, &request)
-    if err != nil {
-        return nil, fmt.Errorf("client.GetFileStat failed: %s", err)
-    }
+    st := status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Print(st.String())
+        return nil, st.Err()
+    } 
 
     shared.PrintFileInfo(fileStat)
 
@@ -135,12 +143,14 @@ func lock(client pb.DFSClient, filename *string) error {
     }
 
     response, err := client.LockFile(ctx, &request)
-    if err != nil {
-        return fmt.Errorf("client.LockFile failed: %s", err)
+    st := status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Print(st.String())
+        return st.Err()
     }
 
     if response.LockOwner == id { 
-        log.Printf("%s locked successfully")
+        log.Printf("%s locked successfully", *filename)
     }
 
     return nil
@@ -172,25 +182,27 @@ func store(client pb.DFSClient, filename *string) {
 
     // Determine if client has newer version of file
     serverFileStat, err := stat(client, filename) 
-    if _, ok := err.(shared.FileNotFoundError); ok {
-        log.Printf("Caught file not found error: %s", err.Error())
-    } else if err != nil {
-        log.Fatalf("stat failed: %s", err)
+    st := status.Convert(err)
+    if st.Code() == codes.NotFound {
+        log.Printf("Caught file not found error: %s", st.String())
+    } 
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
     }
 
     if err == nil && serverFileStat.Crc == crc {
         log.Fatalf("Client and Server have same file contents. Exiting.")
     }
 
-    if err == nil && serverFileStat.Mtime > uint32(info.ModTime().Unix()) {
+    if err == nil && serverFileStat.Mtime > int32(info.ModTime().Unix()) {
         log.Fatalf("Server has more recent version of file than client. Exiting.")
     }
 
     // Initialize request
     metadata := pb.MetaData{
         Name: *filename,
-        Size: int(info.Size()),
-        Mtime: int(info.ModTime().Unix()),
+        Size: int32(info.Size()),
+        Mtime: int32(info.ModTime().Unix()),
         Crc: crc,
         LockOwner: id,
     }
@@ -200,8 +212,9 @@ func store(client pb.DFSClient, filename *string) {
     msg := &pb.StoreRequest{RequestData: &request}
 
     stream, err := client.StoreFile(ctx)
-    if err != nil {
-        log.Fatalf("client.StoreFile failed: %s", err)
+    st = status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
     }
 
     // Send metadata as inital request in stream
@@ -230,7 +243,7 @@ func store(client pb.DFSClient, filename *string) {
 
         filedata := pb.FileData {
             Content: buf,
-            Size: numBytes,
+            Size: int32(numBytes),
         }
         request := pb.StoreRequest_Filedata{
             Filedata: &filedata,

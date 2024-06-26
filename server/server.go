@@ -13,6 +13,8 @@ import (
 	pb "github.com/andrewwtpowell/dfs/contract"
 	"github.com/andrewwtpowell/dfs/shared"
 	"google.golang.org/grpc"
+    "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/status"
 )
 
 var (
@@ -51,12 +53,14 @@ func newServer() *dfsServer {
     s := &dfsServer{mount: *mountPath}
     list, err := shared.RefreshFileList(s.mount)
     if err != nil {
-        log.Fatalf("refreshFileLIst: %s", err)
+        log.Fatalf("refreshFileList: %s", err)
     }
 
     log.Printf("Found files at %s: \n", s.mount)
     s.fileList = list
     shared.PrintFileList(&s.fileList)
+
+    s.lockMap = make(map[string]string)
 
     return s
 }
@@ -73,22 +77,31 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
     // Process first message in stream (metadata)
     msg, err := stream.Recv()
     if err != nil {
+        errMsg := fmt.Sprintf("stream.Recv failed: %s", err)
+        log.Print(err)
+        err := status.Error(codes.Canceled, errMsg)
         return err
     }
 
     metadata := msg.GetMetadata()
     if metadata == nil {
-        return fmt.Errorf("Initial request message must contain MetaData")
+        errMsg := fmt.Sprint("initial message in stream must contain MetaData")
+        log.Print(errMsg)
+        err := status.Error(codes.InvalidArgument, errMsg)
+        return err
     }
 
     // If file is locked return error, otherwise lock the file
-    if s.lockMap[metadata.GetName()] != metadata.LockOwner &&
-        s.lockMap[metadata.GetName()] != "" {
-        return fmt.Errorf("File %s locked by client %s", metadata.GetName(), s.lockMap[metadata.GetName()])
+    if s.lockMap[metadata.Name] != metadata.LockOwner &&
+        s.lockMap[metadata.Name] != "" {
+        errMsg := fmt.Sprintf("file %s locked by client %s", metadata.Name, metadata.LockOwner)
+        log.Printf(errMsg)
+        err := status.Errorf(codes.ResourceExhausted, errMsg)
+        return err
     }
 
-    s.lockMap[metadata.GetName()] = metadata.GetLockOwner()
-    defer func() { s.lockMap[metadata.GetName()] = "" }()
+    s.lockMap[metadata.Name] = metadata.LockOwner
+    defer func() { s.lockMap[metadata.Name] = "" }()
 
     // If file already exists on server, has been modified more recently than server verion,
     // and file data does not differ from server version, then update the MetaData for the server version
@@ -98,12 +111,12 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
     // do binary search to find if file is present
     for _, file := range s.fileList {
 
-        if file.Name == metadata.GetName() &&
-            file.Mtime < metadata.GetMtime() &&
-            file.Crc == metadata.GetCrc() {
+        if file.Name == metadata.Name &&
+            file.Mtime < metadata.Mtime &&
+            file.Crc == metadata.Crc {
 
-            log.Printf("Server file contents match stored file - updating modification time for file %s", metadata.GetName())
-            file.Mtime = metadata.GetMtime()
+            log.Printf("Server file contents match stored file - updating modification time for file %s", metadata.Name)
+            file.Mtime = metadata.Mtime
 
             return stream.SendAndClose(&pb.MetaData{
                 Name:       file.Name,
@@ -114,76 +127,93 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
             })
         }
 
-        if file.Name == metadata.GetName() &&
-            file.Mtime >= metadata.GetMtime() {
+        if file.Name == metadata.Name &&
+            file.Mtime >= metadata.Mtime {
 
-            return fmt.Errorf("File already present on server - ignoring")
+            log.Printf("File %s already present on server - ignoring", metadata.Name)
+            return nil
         }
     }
 
-    log.Printf("Opening file %s for writing", metadata.GetName())
-    file, err := os.OpenFile(metadata.GetName(), os.O_WRONLY|os.O_CREATE, 0644)
+    log.Printf("Opening file %s for writing", metadata.Name)
+    file, err := os.OpenFile(metadata.Name, os.O_WRONLY|os.O_CREATE, 0644)
     if err != nil {
-        log.Print(err)
+        errMsg := fmt.Sprintf("error opening file %s: %s", metadata.Name, err)
+        log.Print(errMsg)
+        err := status.Errorf(codes.Canceled, errMsg)
         return err
     }
 
     defer func() {
         if err := file.Close(); err != nil {
-            log.Fatal(err)
+            log.Fatalf("error closing file %s: %s", metadata.Name, err)
         }
     }()
 
-    log.Printf("Writing request contents to file %s", metadata.GetName())
+    log.Printf("Writing request contents to file %s", metadata.Name)
     for {
 
         msg, err := stream.Recv()
 
         if err == io.EOF {
             // Reached end of stream, send file metadata response
-            log.Printf("StoreFile successful for file %s", metadata.GetName())
+            log.Printf("StoreFile successful for file %s", metadata.Name)
             info, err := file.Stat()
             if err != nil {
+                errMsg := fmt.Sprintf("Stat failed for stored file: %s", err)
+                log.Print(errMsg)
+                err := status.Errorf(codes.Canceled, errMsg)
                 return err
             }
             
             _, err = shared.RefreshFileList(s.mount)
             if err != nil {
-                log.Print(err)
+                errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
+                log.Print(errMsg)
+                err := status.Errorf(codes.Canceled, errMsg)
                 return err
             }
 
             var crc uint32
             for _, file := range s.fileList {
-                if file.GetName() == info.Name() {
-                    crc = file.GetCrc()
+                if file.Name == info.Name() {
+                    crc = file.Crc
                 }
             }
             
             return stream.SendAndClose(&pb.MetaData{
                 Name: info.Name(),
-                Size: uint32(info.Size()),
-                Mtime: uint32(info.ModTime().Unix()),
+                Size: int32(info.Size()),
+                Mtime: int32(info.ModTime().Unix()),
                 LockOwner: s.lockMap[info.Name()],
                 Crc: crc,
             })
         }
         if err != nil {
+            errMsg := fmt.Sprintf("stream.Recv failed: %s", err)
+            log.Print(errMsg)
+            err := status.Errorf(codes.Unknown, errMsg)
             return err
         }
 
         // Process the request 
         data := msg.GetFiledata()
         if data == nil {
-            return fmt.Errorf("Invalid chunk received in file data stream")
+            errMsg := fmt.Sprintf("invalid chunk received in file data stream")
+            log.Print(errMsg)
+            err := status.Error(codes.InvalidArgument, errMsg)
+            return err
         }
         
         bytes, err := file.Write(data.GetContent())
         if err != nil {
+            errMsg := fmt.Sprint("writing content to file failed")
+            log.Print(errMsg)
+            err := status.Error(codes.Canceled, errMsg)
             return err
         }
 
-        log.Printf("Wrote %d bytes to file %s", bytes, metadata.GetName())
+        log.Printf("Wrote %d bytes to file %s", bytes, metadata.Name)
     }
 }
 
@@ -210,41 +240,47 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
     defer shared.RefreshFileList(s.mount)
 
     // If file is locked return error, otherwise lock the file
-    if s.lockMap[request.GetName()] != request.GetLockOwner() &&
-        s.lockMap[request.GetName()] != "" {
-        return nil, fmt.Errorf("File %s locked by client %s", request.GetName(), s.lockMap[request.GetName()])
+    if s.lockMap[request.Name] != request.LockOwner &&
+        s.lockMap[request.Name] != "" {
+
+        errMsg := fmt.Sprintf("File %s locked by client %s", request.Name, s.lockMap[request.Name])
+        log.Print(errMsg)
+        err := status.Error(codes.ResourceExhausted, errMsg)
+        return nil, err
     }
 
     // Check server list for file
     for _, file := range s.fileList {
 
-        if(request.GetName() == file.Name) {
-            os.Remove(request.GetName())
-            delete(s.lockMap, request.GetName())
+        if(request.Name == file.Name) {
+            os.Remove(request.Name)
+            delete(s.lockMap, request.Name)
             return file, nil
         }
     }
 
-    fnf := shared.FileNotFoundError(request.GetName())
-    return nil, fnf
+    errMsg := fmt.Sprintf("File %s not found", request.Name)
+    log.Print(errMsg)
+    err := status.Error(codes.NotFound, errMsg)
+    return nil, err
 }
 
 func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
 
-    log.Printf("Client %s requesting info for file %s", request.GetLockOwner(), request.GetName())
+    log.Printf("Client %s requesting info for file %s", request.LockOwner, request.Name)
     s.dataMutex.Lock()
     defer s.dataMutex.Unlock()
 
     for _, file := range s.fileList {
 
-        if file.GetName() == request.GetName() {
-            log.Printf("Found file %s", request.GetName())
+        if file.Name == request.Name {
+            log.Printf("Found file %s", request.Name)
             response := &pb.MetaData{
-                Name:       file.GetName(),
-                Size:       file.GetSize(),
-                Mtime:      file.GetMtime(),
-                LockOwner:  s.lockMap[file.GetName()],
-                Crc:        file.GetCrc(),
+                Name:       file.Name,
+                Size:       file.Size,
+                Mtime:      file.Mtime,
+                LockOwner:  s.lockMap[file.Name],
+                Crc:        file.Crc,
             }
             shared.PrintFileInfo(response)
 
@@ -252,21 +288,24 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
         }
     }
 
-    fnf := shared.FileNotFoundError(request.GetName())
-    return nil, fnf
+    errMsg := fmt.Sprintf("File %s not found", request.Name)
+    log.Print(errMsg)
+    err := status.Error(codes.NotFound, errMsg)
+    return nil, err
 }
 
 func (s *dfsServer) LockFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
 
-    log.Printf("Client %s attempting to lock file %s", request.GetLockOwner(), request.GetName())
+    log.Printf("Client %s attempting to lock file %s", request.LockOwner, request.Name)
     
-    if request.GetLockOwner() == "" {
-        return nil, fmt.Errorf("No client ID supplied in lock request")
+    if request.LockOwner == "" {
+        err := status.Error(codes.InvalidArgument, "No client ID supplied in lock request")
+        return nil, err
     }
 
-    if s.lockMap[request.GetName()] == "" {
+    if s.lockMap[request.Name] == "" {
         s.lockMap[request.Name] = request.LockOwner
-        log.Printf("Client %s locked file %s", request.GetLockOwner(), request.GetName())
+        log.Printf("Client %s locked file %s", request.LockOwner, request.Name)
         return request, nil
     } 
 
@@ -275,5 +314,6 @@ func (s *dfsServer) LockFile(ctx context.Context, request *pb.MetaData) (*pb.Met
         return request, nil
     } 
 
-    return nil, fmt.Errorf("File %s not available. Locked by client %s", request.Name, s.lockMap[request.Name])
+    err := status.Errorf(codes.ResourceExhausted, "File %s not available. Locked by client %s", request.Name, s.lockMap[request.Name])
+    return nil, err
 }
