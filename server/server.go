@@ -135,10 +135,11 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
         }
     }
 
-    log.Printf("Opening file %s for writing", metadata.Name)
-    file, err := os.OpenFile(metadata.Name, os.O_WRONLY|os.O_CREATE, 0644)
+    mountedFileLoc := s.mount + metadata.Name
+    log.Printf("Opening file %s for writing", mountedFileLoc)
+    file, err := os.OpenFile(mountedFileLoc, os.O_WRONLY|os.O_CREATE, 0644)
     if err != nil {
-        errMsg := fmt.Sprintf("error opening file %s: %s", metadata.Name, err)
+        errMsg := fmt.Sprintf("error opening file %s: %s", mountedFileLoc, err)
         log.Print(errMsg)
         err := status.Errorf(codes.Canceled, errMsg)
         return err
@@ -146,18 +147,18 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 
     defer func() {
         if err := file.Close(); err != nil {
-            log.Fatalf("error closing file %s: %s", metadata.Name, err)
+            log.Fatalf("error closing file %s: %s", mountedFileLoc, err)
         }
     }()
 
-    log.Printf("Writing request contents to file %s", metadata.Name)
+    log.Printf("Writing request contents to file %s", mountedFileLoc)
     for {
 
         msg, err := stream.Recv()
 
         if err == io.EOF {
             // Reached end of stream, send file metadata response
-            log.Printf("StoreFile successful for file %s", metadata.Name)
+            log.Printf("StoreFile successful for file %s", mountedFileLoc)
             info, err := file.Stat()
             if err != nil {
                 errMsg := fmt.Sprintf("Stat failed for stored file: %s", err)
@@ -213,7 +214,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
             return err
         }
 
-        log.Printf("Wrote %d bytes to file %s", bytes, metadata.Name)
+        log.Printf("Wrote %d bytes to file %s", bytes, mountedFileLoc)
     }
 }
 

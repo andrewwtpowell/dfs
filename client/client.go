@@ -185,8 +185,7 @@ func store(client pb.DFSClient, filename *string) {
     st := status.Convert(err)
     if st.Code() == codes.NotFound {
         log.Printf("Caught file not found error: %s", st.String())
-    } 
-    if st.Code() != codes.OK {
+    } else if st.Code() != codes.OK {
         log.Fatal(st.String())
     }
 
