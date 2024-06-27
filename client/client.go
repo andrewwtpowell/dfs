@@ -81,6 +81,11 @@ func main() {
         }
         stat(client, &filename)
     case "delete":
+        filename := os.Args[2]
+        if filename == "" {
+            log.Fatalf("No file name provided for delete RPC")
+        }
+        deleteFile(client, &filename)
     case "fetch":
     default:
         log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
@@ -104,6 +109,37 @@ func list(client pb.DFSClient) {
     for _, file := range list.FileList {
         log.Printf("%s", file.GetName())
     }
+}
+
+// deleteFile removes file from server
+func deleteFile(client pb.DFSClient, filename *string) {
+
+    log.Printf("Attempting to delete file %s" , *filename)
+    _, err := stat(client, filename) 
+    st := status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
+    } 
+
+    if err := lock(client, filename); err != nil {
+        log.Fatal(err)
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
+    defer cancel()
+
+    request := pb.MetaData{
+        Name: *filename,
+        LockOwner: id,
+    }
+
+    _, err = client.DeleteFile(ctx, &request)
+    st = status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
+    }
+
+    log.Printf("File %s deleted successfully", *filename)
 }
 
 // stat gets file statistics for a server-side file

@@ -269,6 +269,7 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
 
     log.Printf("Client %s requesting info for file %s", request.LockOwner, request.Name)
+    shared.PrintFileList(&s.fileList)
     s.dataMutex.Lock()
     defer s.dataMutex.Unlock()
 
