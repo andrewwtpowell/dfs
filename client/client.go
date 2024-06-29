@@ -45,7 +45,8 @@ func main() {
         log.Fatalf("os.Getwd failed: %s", err)
     }
 
-    fileList, err := shared.RefreshFileList(clientDir + "/mnt/")
+    log.Printf(clientDir)
+    fileList, err := shared.RefreshFileList(clientDir)
     if err != nil {
         log.Fatalf("RefreshFileList: %s", err)
     }
@@ -121,8 +122,10 @@ func deleteFile(client pb.DFSClient, filename *string) {
         log.Fatal(st.String())
     } 
 
-    if err := lock(client, filename); err != nil {
-        log.Fatal(err)
+    err = lock(client, filename)
+    st = status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
     }
 
     ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)

@@ -167,7 +167,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
                 return err
             }
             
-            _, err = shared.RefreshFileList(s.mount)
+            s.fileList, err = shared.RefreshFileList(s.mount)
             if err != nil {
                 errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
                 log.Print(errMsg)
@@ -235,6 +235,8 @@ func (s *dfsServer) ListFiles(ctx context.Context, request *pb.MetaData) (*pb.Li
 
 func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
 
+    log.Printf("Received request to delete file %s", request.Name)
+
     s.dataMutex.Lock()
     defer s.dataMutex.Unlock()
 
@@ -254,8 +256,19 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
     for _, file := range s.fileList {
 
         if(request.Name == file.Name) {
-            os.Remove(request.Name)
+            log.Printf("Removing file %s", s.mount + request.Name)
+            os.Remove(s.mount + request.Name)
             delete(s.lockMap, request.Name)
+
+            var err error
+            s.fileList, err = shared.RefreshFileList(s.mount)
+            if err != nil {
+                errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
+                log.Print(errMsg)
+                err := status.Errorf(codes.Canceled, errMsg)
+                return nil, err
+            }
+
             return file, nil
         }
     }

@@ -15,6 +15,13 @@ const (
 
 func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
 
+    byteDir := []rune(mountDir)
+    if byteDir[len(byteDir)-1] != '/' {
+        log.Printf("Passed in dir %s missing closing / - adding", mountDir)
+        byteDir = append(byteDir, '/')
+        mountDir = string(byteDir)
+    }
+
     err := os.MkdirAll(mountDir, os.ModePerm)
     if err != nil {
         log.Fatalf("creating dir %s failed: %s", mountDir, err)
