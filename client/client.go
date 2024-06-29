@@ -308,3 +308,47 @@ func store(client pb.DFSClient, filename *string) {
         log.Fatalf("Client/Server CRC mismatch. Client CRC: %d, Server CRC: %d", crc, response.Crc)
     }
 }
+
+// fetch fetches a file from the server and stores it on the client
+func fetch(client pb.DFSClient, filename *string) {
+
+    log.Printf("Requesting file %s from server", *filename)
+
+    ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
+    defer cancel()
+
+    request := pb.MetaData{
+        Name: *filename,
+        LockOwner: id,
+    }
+    stream, err := client.FetchFile(ctx, &request)
+    if err != nil {
+        log.Fatalf("client.FetchFile failed: %s", err)
+    }
+    
+    msg, err := stream.Recv()
+    if err != nil {
+        log.Fatalf("stream.Recv failed: %s", err)
+    }
+
+    metadata := msg.GetMetadata()
+    if metadata == nil {
+        log.Fatal("Received incorrect response type from server")
+    }
+
+    if metadata.Crc <= 0 {
+        log.Fatal("Server file CRC not provided")
+    }
+
+    crc, err := shared.CalculateCrc(filename)
+    if err != nil {
+        log.Fatalf("CalculateCrc failed: %s", err)
+    }
+
+    if crc == metadata.Crc {
+        log.Printf("Client already has up to date version of file %s, exiting", *filename)
+        return
+    }
+
+
+}

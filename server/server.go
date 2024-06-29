@@ -72,8 +72,6 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
     s.dataMutex.Lock()
     defer s.dataMutex.Unlock()
 
-    // Implement based on c++ implementation and go route_guide example
-
     // Process first message in stream (metadata)
     msg, err := stream.Recv()
     if err != nil {
@@ -277,6 +275,92 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
     log.Print(errMsg)
     err := status.Error(codes.NotFound, errMsg)
     return nil, err
+}
+
+func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServer) error {
+
+    log.Printf("Client %s requesting file %s", request.LockOwner, request.Name)
+    shared.PrintFileList(&s.fileList)
+    
+    s.dataMutex.Lock()
+    defer s.dataMutex.Unlock()
+
+    mountedFile := s.mount + request.Name
+
+    fileInfo, err := os.Stat(mountedFile)
+    if err != nil {
+        errMsg := fmt.Sprintf("Stat failed: %s", err)
+        log.Print(errMsg)
+        st := status.Error(codes.NotFound, errMsg)
+        return st
+    }
+
+    crc, err := shared.CalculateCrc(&mountedFile)
+    if err != nil {
+        errMsg := fmt.Sprintf("CalculateCRC failed: %s", err)
+        log.Print(errMsg)
+        st := status.Error(codes.Unknown, errMsg)
+        return st
+    }
+
+    metadata := pb.MetaData{
+        Name: request.Name,
+        Size: int32(fileInfo.Size()),
+        Mtime: int32(fileInfo.ModTime().Unix()),
+        Crc: crc,
+    }
+    response := pb.FetchResponse_Metadata{ Metadata: &metadata }
+    msg := pb.FetchResponse{ ResponseData: &response }
+
+    stream.Send(&msg)
+
+    var bufSize int
+    if fileInfo.Size() > shared.MaxBufSize {
+        bufSize = shared.MaxBufSize
+    } else {
+        bufSize = int(fileInfo.Size())
+    }
+
+    file, err := os.Open(mountedFile)
+    defer file.Close()
+    if err != nil {
+        errMsg := fmt.Sprintf("Unable to open file %s: %s", s.mount + request.Name, err)
+        log.Print(errMsg)
+        st := status.Error(codes.NotFound, errMsg)
+        return st
+    }
+
+    buf := make([]byte, bufSize)
+
+    for {
+
+        numBytes, readErr := file.Read(buf)
+        if readErr != nil && readErr != io.EOF {
+            errMsg := fmt.Sprintf("file.Read failed: %s", readErr)
+            log.Printf(errMsg)
+            st := status.Error(codes.Unknown, errMsg)
+            return st
+        }
+
+        filedata := pb.FileData {
+            Content: buf,
+            Size: int32(numBytes),
+        }
+        response := pb.FetchResponse_Filedata{ Filedata: &filedata }
+        msg := &pb.FetchResponse{ ResponseData: &response }
+        if err := stream.Send(msg); err != nil {
+            errMsg := fmt.Sprintf("stream.Send(%v) failed: %s", msg, err)
+            log.Print(errMsg)
+            st := status.Error(codes.Unknown, errMsg)
+            return st
+        }
+
+        if readErr == io.EOF {
+            break
+        } 
+    }
+    
+    return nil
 }
 
 func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
