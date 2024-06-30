@@ -110,9 +110,9 @@ func list(client pb.DFSClient) {
         log.Fatalf("client.ListFiles failed: %s", err)
     }
 
-    log.Printf("Received list containing %d files", len(list.FileList))
+    log.Printf("Received list containing %d files:", len(list.FileList))
     for _, file := range list.FileList {
-        log.Printf("%s", file.GetName())
+        fmt.Printf("%+v\n", file)
     }
 }
 
@@ -278,21 +278,27 @@ func store(client pb.DFSClient, filename *string) {
 
     for {
 
-        _, err := file.Read(buf)
-        if err == io.EOF {
+        numBytes, err := file.Read(buf)
+        if err == io.EOF && numBytes == 0 {
             break
-        } 
+        }
+
+        request := pb.StoreRequest_Content { Content: buf }
+        msg := &pb.StoreRequest { RequestData: &request }
+
+        if err == io.EOF && numBytes != 0 {
+            if err := stream.Send(msg); err != nil {
+                log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
+            }
+            break
+        }
 
         if err != nil {
             log.Fatalf("file.Read failed: %s", err)
         }
 
-        request := pb.StoreRequest_Content {
-            Content: buf,
-        }
-        msg := &pb.StoreRequest{RequestData: &request}
         if err := stream.Send(msg); err != nil {
-            log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", msg, err)
+            log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
         }
     }
 

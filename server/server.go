@@ -332,9 +332,22 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
 
     for {
 
-        _, err := file.Read(buf)
-        if err == io.EOF {
-            break
+        numBytes, err := file.Read(buf)
+        if err == io.EOF && numBytes == 0 {
+            return nil
+        } 
+
+        response := pb.FetchResponse_Content{ Content: buf }
+        msg := &pb.FetchResponse{ ResponseData: &response }
+
+        if err == io.EOF && numBytes != 0 {
+            if err := stream.Send(msg); err != nil {
+                errMsg := fmt.Sprintf("stream.Send(%v) failed: %s", msg, err)
+                log.Print(errMsg)
+                st := status.Error(codes.Unknown, errMsg)
+                return st
+            }
+            return nil
         } 
 
         if err != nil {
@@ -344,8 +357,6 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
             return st
         }
 
-        response := pb.FetchResponse_Content{ Content: buf }
-        msg := &pb.FetchResponse{ ResponseData: &response }
         if err := stream.Send(msg); err != nil {
             errMsg := fmt.Sprintf("stream.Send(%v) failed: %s", msg, err)
             log.Print(errMsg)
@@ -353,8 +364,6 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
             return st
         }
     }
-    
-    return nil
 }
 
 func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
