@@ -339,15 +339,56 @@ func fetch(client pb.DFSClient, filename *string) {
         log.Fatal("Server file CRC not provided")
     }
 
-    crc, err := shared.CalculateCrc(filename)
-    if err != nil {
-        log.Fatalf("CalculateCrc failed: %s", err)
+    file, err := os.OpenFile(*filename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+    defer file.Close()
+    if err != nil && !os.IsNotExist(err) {
+        log.Fatalf("error opening file %s: %s", *filename, err)
+    } else {
+        crc, err := shared.CalculateCrc(filename)
+        if err != nil {
+            log.Fatalf("CalculateCrc failed: %s", err)
+        }
+
+        if crc == metadata.Crc {
+            log.Printf("Client already has up to date version of file %s, exiting", *filename)
+            return
+        }
     }
 
-    if crc == metadata.Crc {
-        log.Printf("Client already has up to date version of file %s, exiting", *filename)
-        return
+    log.Printf("Writing response contents to file %s", *filename)
+
+    for {
+
+        msg, err := stream.Recv()
+
+        if err == io.EOF {
+
+            log.Printf("Fetch successful for file %s", *filename)
+
+            crc, err := shared.CalculateCrc(filename)
+            if err != nil {
+                log.Fatalf("CalculateCrc failed: %s", err)
+            }
+
+            if crc == metadata.Crc {
+                log.Printf("CRC mismatch. Server CRC: %d, Client CRC: %d", metadata.Crc, crc)
+                return
+            }
+        }
+        if err != nil {
+            log.Fatalf("stream.Recv failed: %s", err)
+        }
+
+        data := msg.GetFiledata()
+        if data == nil {
+            log.Fatalf("invalid chunk received in file data stream")
+        }
+        
+        bytes, err := file.Write(data.GetContent())
+        if err != nil {
+            log.Fatalf("writing content to file failed")
+        }
+
+        log.Printf("Wrote %d bytes to file %s", bytes, *filename)
     }
-
-
 }
