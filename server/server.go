@@ -208,11 +208,16 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
         if err != nil {
             errMsg := fmt.Sprint("writing content to file failed")
             log.Print(errMsg)
-            err := status.Error(codes.Canceled, errMsg)
+            err := status.Error(codes.Unknown, errMsg)
             return err
         }
 
-        log.Printf("Wrote %d bytes to file %s", bytes, mountedFileLoc)
+        if bytes != int(data.GetSize()) {
+            errMsg := fmt.Sprintf("Received %d bytes, wrote %d bytes", data.GetSize(), bytes)
+            log.Print(errMsg)
+            err := status.Error(codes.Unknown, errMsg)
+            return err
+        }
     }
 }
 
@@ -334,13 +339,19 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
 
     for {
 
-        numBytes, readErr := file.Read(buf)
-        if readErr != nil && readErr != io.EOF {
-            errMsg := fmt.Sprintf("file.Read failed: %s", readErr)
+        numBytes, err := file.Read(buf)
+        if err == io.EOF {
+            break
+        } 
+
+        if err != nil {
+            errMsg := fmt.Sprintf("file.Read failed: %s", err)
             log.Printf(errMsg)
             st := status.Error(codes.Unknown, errMsg)
             return st
         }
+
+        log.Printf("Read %d bytes from file %s", numBytes, mountedFile)
 
         filedata := pb.FileData {
             Content: buf,
@@ -354,10 +365,6 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
             st := status.Error(codes.Unknown, errMsg)
             return st
         }
-
-        if readErr == io.EOF {
-            break
-        } 
     }
     
     return nil

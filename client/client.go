@@ -74,6 +74,11 @@ func main() {
         }
         deleteFile(client, &filename)
     case "fetch":
+        filename := os.Args[2]
+        if filename == "" {
+            log.Fatalf("No file name provided for fetch RPC")
+        }
+        fetch(client, &filename)
     default:
         log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
     }
@@ -273,10 +278,16 @@ func store(client pb.DFSClient, filename *string) {
 
     for {
 
-        numBytes, readErr := file.Read(buf)
-        if readErr != nil && readErr != io.EOF {
-            log.Fatalf("file.Read failed: %s", readErr)
+        numBytes, err := file.Read(buf)
+        if err == io.EOF {
+            break
+        } 
+
+        if err != nil {
+            log.Fatalf("file.Read failed: %s", err)
         }
+
+        log.Printf("Read %d bytes from file %s", numBytes, *filename)
 
         filedata := pb.FileData {
             Content: buf,
@@ -289,10 +300,6 @@ func store(client pb.DFSClient, filename *string) {
         if err := stream.Send(msg); err != nil {
             log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", msg, err)
         }
-
-        if readErr == io.EOF {
-            break
-        } 
     }
 
     response, err := stream.CloseAndRecv()
@@ -341,9 +348,7 @@ func fetch(client pb.DFSClient, filename *string) {
 
     file, err := os.OpenFile(*filename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
     defer file.Close()
-    if err != nil && !os.IsNotExist(err) {
-        log.Fatalf("error opening file %s: %s", *filename, err)
-    } else {
+    if err != nil && os.IsExist(err) {
         crc, err := shared.CalculateCrc(filename)
         if err != nil {
             log.Fatalf("CalculateCrc failed: %s", err)
@@ -353,6 +358,15 @@ func fetch(client pb.DFSClient, filename *string) {
             log.Printf("Client already has up to date version of file %s, exiting", *filename)
             return
         }
+
+        file, err = os.OpenFile(*filename, os.O_WRONLY, 0644)
+        if err != nil {
+            log.Fatalf("os.OpenFile failed: %s", err)
+        }
+        defer file.Close()
+
+    } else if err != nil && !os.IsNotExist(err) {
+        log.Fatalf("error opening file %s: %s", *filename, err)
     }
 
     log.Printf("Writing response contents to file %s", *filename)
@@ -370,10 +384,11 @@ func fetch(client pb.DFSClient, filename *string) {
                 log.Fatalf("CalculateCrc failed: %s", err)
             }
 
-            if crc == metadata.Crc {
+            if crc != metadata.Crc {
                 log.Printf("CRC mismatch. Server CRC: %d, Client CRC: %d", metadata.Crc, crc)
-                return
             }
+
+            return 
         }
         if err != nil {
             log.Fatalf("stream.Recv failed: %s", err)
@@ -389,6 +404,8 @@ func fetch(client pb.DFSClient, filename *string) {
             log.Fatalf("writing content to file failed")
         }
 
-        log.Printf("Wrote %d bytes to file %s", bytes, *filename)
+        if bytes != int(data.GetSize()) {
+            log.Fatalf("Received %d bytes, wrote %d bytes", data.GetSize(), bytes)
+        }
     }
 }
