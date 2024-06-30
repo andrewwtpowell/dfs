@@ -278,7 +278,7 @@ func store(client pb.DFSClient, filename *string) {
 
     for {
 
-        numBytes, err := file.Read(buf)
+        _, err := file.Read(buf)
         if err == io.EOF {
             break
         } 
@@ -287,14 +287,8 @@ func store(client pb.DFSClient, filename *string) {
             log.Fatalf("file.Read failed: %s", err)
         }
 
-        log.Printf("Read %d bytes from file %s", numBytes, *filename)
-
-        filedata := pb.FileData {
+        request := pb.StoreRequest_Content {
             Content: buf,
-            Size: int32(numBytes),
-        }
-        request := pb.StoreRequest_Filedata{
-            Filedata: &filedata,
         }
         msg := &pb.StoreRequest{RequestData: &request}
         if err := stream.Send(msg); err != nil {
@@ -394,18 +388,14 @@ func fetch(client pb.DFSClient, filename *string) {
             log.Fatalf("stream.Recv failed: %s", err)
         }
 
-        data := msg.GetFiledata()
+        data := msg.GetContent()
         if data == nil {
             log.Fatalf("invalid chunk received in file data stream")
         }
         
-        bytes, err := file.Write(data.GetContent())
+        _, err = file.Write(data)
         if err != nil {
             log.Fatalf("writing content to file failed")
-        }
-
-        if bytes != int(data.GetSize()) {
-            log.Fatalf("Received %d bytes, wrote %d bytes", data.GetSize(), bytes)
         }
     }
 }

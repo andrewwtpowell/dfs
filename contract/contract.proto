@@ -29,22 +29,17 @@ message MetaData {
     uint32 crc = 5;
 }
 
-message FileData {
-    bytes content = 1;
-    int32 size = 2;
-} 
-
 message StoreRequest {
     oneof requestData {
         MetaData metadata = 1;
-        FileData filedata = 2;
+        bytes content = 2;
     }
 }
 
 message FetchResponse {
     oneof responseData {
         MetaData metadata = 1;
-        FileData filedata = 2;
+        bytes content = 2;
     }
 }
 
