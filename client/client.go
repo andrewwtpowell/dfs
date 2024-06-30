@@ -39,20 +39,6 @@ func main() {
     id = name + fmt.Sprint(pid)
     log.Printf("starting client %s", id)
 
-    // Refresh client file list
-    clientDir, err := os.Getwd()
-    if err != nil {
-        log.Fatalf("os.Getwd failed: %s", err)
-    }
-
-    log.Printf(clientDir)
-    fileList, err := shared.RefreshFileList(clientDir)
-    if err != nil {
-        log.Fatalf("RefreshFileList: %s", err)
-    }
-
-    shared.PrintFileList(&fileList)
-
     // Connect to server
     log.Printf("connecting to server at %s", server)
     conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -91,6 +77,19 @@ func main() {
     default:
         log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
     }
+}
+
+func getFileList(mountDir string) []*pb.MetaData {
+
+    log.Printf("updating file list with files at %s", mountDir)
+    fileList, err := shared.RefreshFileList(mountDir)
+    if err != nil {
+        log.Fatalf("RefreshFileList: %s", err)
+    }
+
+    shared.PrintFileList(&fileList)
+
+    return fileList
 }
 
 // list gets files present on the server and prints them to stdout
