@@ -51,7 +51,7 @@ func main() {
 
 func newServer() *dfsServer {
 	s := &dfsServer{mount: *mountPath}
-	list, err := shared.RefreshFileList(s.mount)
+	list, err := shared.RefreshFileList(&s.mount)
 	if err != nil {
 		log.Fatalf("refreshFileList: %s", err)
 	}
@@ -165,7 +165,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 				return err
 			}
 
-			s.fileList, err = shared.RefreshFileList(s.mount)
+			s.fileList, err = shared.RefreshFileList(&s.mount)
 			if err != nil {
 				errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
 				log.Print(errMsg)
@@ -236,7 +236,7 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 	s.dataMutex.Lock()
 	defer s.dataMutex.Unlock()
 
-	defer shared.RefreshFileList(s.mount)
+	defer shared.RefreshFileList(&s.mount)
 
 	// If file is locked return error, otherwise lock the file
 	if s.lockMap[request.Name] != request.LockOwner &&
@@ -257,7 +257,7 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 			delete(s.lockMap, request.Name)
 
 			var err error
-			s.fileList, err = shared.RefreshFileList(s.mount)
+			s.fileList, err = shared.RefreshFileList(&s.mount)
 			if err != nil {
 				errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
 				log.Print(errMsg)

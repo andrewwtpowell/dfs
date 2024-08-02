@@ -14,14 +14,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+    "github.com/fsnotify/fsnotify"
 )
 
 const deadlineTimeout = 7
 
 var (
-	server   = os.Getenv("DFS_SERVER_ADDR")
-	fileList []pb.MetaData
-	id       string
+	server    = os.Getenv("DFS_SERVER_ADDR")
+	fileList  []*pb.MetaData
+	id        string
 )
 
 func main() {
@@ -53,6 +54,13 @@ func main() {
 	}
 
 	switch os.Args[1] {
+    case "mount":
+        mountPath := os.Args[2]
+        if mountPath == "" {
+            mountPath = "mnt/"
+        }
+        fileList = getFileList(&mountPath)
+        mount(client, &mountPath)
 	case "list":
 		list(client)
 	case "store":
@@ -84,9 +92,54 @@ func main() {
 	}
 }
 
-func getFileList(mountDir string) []*pb.MetaData {
+func mount(client pb.DFSClient, mountPath *string) {
+    watcher, err := fsnotify.NewWatcher()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer watcher.Close()
 
-	log.Printf("updating file list with files at %s", mountDir)
+    go func() {
+        for {
+            select {
+            case event, ok := <-watcher.Events:
+                if !ok {
+                    return
+                }
+                log.Println("event:", event)
+                if event.Has(fsnotify.Create) {
+                    log.Println("created file: ", event.Name)
+                    //TODO split event.Name to only grab the file name, not the entire path
+                    store(client, &event.Name)
+                }
+                if event.Has(fsnotify.Write) {
+                    log.Println("modified file: ", event.Name)
+                    store(client, &event.Name)
+                }
+                if event.Has(fsnotify.Remove) {
+                    log.Println("removed file: ", event.Name)
+                    deleteFile(client, &event.Name)
+                }
+            case err, ok := <-watcher.Errors:
+                if !ok {
+                    return
+                }
+                log.Println("error: ", err)
+            }
+        }
+    }()
+
+    err = watcher.Add(*mountPath)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    <-make(chan struct{})
+}
+
+func getFileList(mountDir *string) []*pb.MetaData {
+
+	log.Printf("updating file list with files at %s", *mountDir)
 	fileList, err := shared.RefreshFileList(mountDir)
 	if err != nil {
 		log.Fatalf("RefreshFileList: %s", err)

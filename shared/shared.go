@@ -13,23 +13,23 @@ const (
 	MaxBufSize = 4190000
 )
 
-func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
+func RefreshFileList(mountDir *string) ([]*pb.MetaData, error) {
 
-	byteDir := []rune(mountDir)
+	byteDir := []rune(*mountDir)
 	if byteDir[len(byteDir)-1] != '/' {
-		log.Printf("Passed in dir %s missing closing / - adding", mountDir)
+		log.Printf("Passed in dir %s missing closing / - adding", *mountDir)
 		byteDir = append(byteDir, '/')
-		mountDir = string(byteDir)
+		*mountDir = string(byteDir)
 	}
 
-	err := os.MkdirAll(mountDir, os.ModePerm)
+	err := os.MkdirAll(*mountDir, os.ModePerm)
 	if err != nil {
-		log.Fatalf("creating dir %s failed: %s", mountDir, err)
+		log.Fatalf("creating dir %s failed: %s", *mountDir, err)
 	}
 
-	files, err := os.ReadDir(mountDir)
+	files, err := os.ReadDir(*mountDir)
 	if err != nil {
-		log.Printf("failed to read files in %s: %s\n", mountDir, err)
+		log.Printf("failed to read files in %s: %s\n", *mountDir, err)
 	}
 
 	// Allocate capacity for new list based on number of files in dir
@@ -42,7 +42,7 @@ func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
 			continue
 		}
 
-		filePath := mountDir + file.Name()
+		filePath := *mountDir + file.Name()
 
 		// Initialize MetaData object and add to list
 		var newFileEntry pb.MetaData
@@ -50,7 +50,7 @@ func RefreshFileList(mountDir string) ([]*pb.MetaData, error) {
 
 		fileInfo, err := file.Info()
 		if err != nil {
-			return nil, fmt.Errorf("unable to get info for directory %s: %s", mountDir, err)
+			return nil, fmt.Errorf("unable to get info for directory %s: %s", *mountDir, err)
 		}
 
 		newFileEntry.Size = int32(fileInfo.Size())
