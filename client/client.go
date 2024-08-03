@@ -6,15 +6,16 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	pb "github.com/andrewwtpowell/dfs/contract"
 	"github.com/andrewwtpowell/dfs/shared"
+	"github.com/fsnotify/fsnotify"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-    "github.com/fsnotify/fsnotify"
 )
 
 const deadlineTimeout = 7
@@ -93,6 +94,18 @@ func main() {
 }
 
 func mount(client pb.DFSClient, mountPath *string) {
+
+    if err := os.Chdir(*mountPath); err != nil {
+        log.Fatal(err)
+    }
+
+    wd, err := os.Getwd()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    log.Println("Updated application working directory: ", wd)
+
     watcher, err := fsnotify.NewWatcher()
     if err != nil {
         log.Fatal(err)
@@ -106,10 +119,10 @@ func mount(client pb.DFSClient, mountPath *string) {
                 if !ok {
                     return
                 }
+                // TODO filter out files that aren't .png / .jpeg / .txt / etc.
                 log.Println("event:", event)
                 if event.Has(fsnotify.Create) {
                     log.Println("created file: ", event.Name)
-                    //TODO split event.Name to only grab the file name, not the entire path
                     store(client, &event.Name)
                 }
                 if event.Has(fsnotify.Write) {
@@ -129,7 +142,7 @@ func mount(client pb.DFSClient, mountPath *string) {
         }
     }()
 
-    err = watcher.Add(*mountPath)
+    err = watcher.Add(wd)
     if err != nil {
         log.Fatal(err)
     }
@@ -170,16 +183,18 @@ func list(client pb.DFSClient) {
 }
 
 // deleteFile removes file from server
-func deleteFile(client pb.DFSClient, filename *string) {
+func deleteFile(client pb.DFSClient, filepath *string) {
 
-	log.Printf("Attempting to delete file %s", *filename)
-	_, err := stat(client, filename)
+	log.Printf("Attempting to delete file %s", *filepath)
+    filename := getFilenameFromPath(*filepath)
+    log.Printf("Filename: %s", filename)
+	_, err := stat(client, filepath)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
 	}
 
-	err = lock(client, filename)
+	err = lock(client, &filename)
 	st = status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -189,7 +204,7 @@ func deleteFile(client pb.DFSClient, filename *string) {
 	defer cancel()
 
 	request := pb.MetaData{
-		Name:      *filename,
+		Name:      filename,
 		LockOwner: id,
 	}
 
@@ -199,7 +214,7 @@ func deleteFile(client pb.DFSClient, filename *string) {
 		log.Fatal(st.String())
 	}
 
-	log.Printf("File %s deleted successfully", *filename)
+	log.Printf("File %s deleted successfully", filename)
 }
 
 // stat gets file statistics for a server-side file
@@ -252,32 +267,38 @@ func lock(client pb.DFSClient, filename *string) error {
 	return nil
 }
 
-// store stores a client file to the dfs server
-func store(client pb.DFSClient, filename *string) {
+func getFilenameFromPath(filepath string) string {
+    return filepath[strings.LastIndex(filepath, "/")+1:]
+}
 
-	log.Printf("Attempting to store file %s", *filename)
+// store stores a client file to the dfs server
+func store(client pb.DFSClient, filepath *string) {
+
+	log.Printf("Attempting to store file %s", *filepath)
+    filename := getFilenameFromPath(*filepath)
+    log.Printf("Filename: %s", filename)
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
 	// Get local file data
-	info, err := os.Stat(*filename)
+	info, err := os.Stat(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Lock file
-	if err := lock(client, filename); err != nil {
+	if err := lock(client, &filename); err != nil {
 		log.Fatal(err)
 	}
 
 	// Calculate client side file crc
-	crc, err := shared.CalculateCrc(filename)
+	crc, err := shared.CalculateCrc(&filename)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Determine if client has newer version of file
-	serverFileStat, err := stat(client, filename)
+	serverFileStat, err := stat(client, &filename)
 	st := status.Convert(err)
 	if st.Code() == codes.NotFound {
 		log.Printf("Caught file not found error: %s", st.String())
@@ -295,7 +316,7 @@ func store(client pb.DFSClient, filename *string) {
 
 	// Initialize request
 	metadata := pb.MetaData{
-		Name:      *filename,
+		Name:      filename,
 		Size:      int32(info.Size()),
 		Mtime:     int32(info.ModTime().Unix()),
 		Crc:       crc,
@@ -321,8 +342,9 @@ func store(client pb.DFSClient, filename *string) {
 	} else {
 		bufSize = int(info.Size())
 	}
+    log.Printf("Data buffer size: %d bytes", bufSize)
 
-	file, err := os.Open(*filename)
+	file, err := os.Open(*filepath)
 	defer file.Close()
 	if err != nil {
 		log.Fatalf("os.Open failed: %s", err)
@@ -339,7 +361,8 @@ func store(client pb.DFSClient, filename *string) {
 		request := pb.StoreRequest_Content{Content: buf}
 		msg := &pb.StoreRequest{RequestData: &request}
 
-		if err == io.EOF && numBytes != 0 {
+		if (err == io.EOF && numBytes != 0) || len(buf) == 0 {
+            log.Printf("reached end of file, sending final %d bytes", len(buf))
 			if err := stream.Send(msg); err != nil {
 				log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
 			}
@@ -350,6 +373,7 @@ func store(client pb.DFSClient, filename *string) {
 			log.Fatalf("file.Read failed: %s", err)
 		}
 
+        //log.Printf("sending %d bytes", len(buf))
 		if err := stream.Send(msg); err != nil {
 			log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
 		}
