@@ -21,9 +21,9 @@ import (
 const deadlineTimeout = 7
 
 var (
-	server    = os.Getenv("DFS_SERVER_ADDR")
-	fileList  []*pb.MetaData
-	id        string
+	server   = os.Getenv("DFS_SERVER_ADDR")
+	fileList []*pb.MetaData
+	id       string
 )
 
 func main() {
@@ -55,13 +55,13 @@ func main() {
 	}
 
 	switch os.Args[1] {
-    case "mount":
-        mountPath := os.Args[2]
-        if mountPath == "" {
-            mountPath = "mnt/"
-        }
-        fileList = getFileList(&mountPath)
-        mount(client, &mountPath)
+	case "mount":
+		mountPath := os.Args[2]
+		if mountPath == "" {
+			mountPath = "mnt/"
+		}
+		fileList = getFileList(&mountPath)
+		mount(client, &mountPath)
 	case "list":
 		list(client)
 	case "store":
@@ -95,59 +95,66 @@ func main() {
 
 func mount(client pb.DFSClient, mountPath *string) {
 
-    if err := os.Chdir(*mountPath); err != nil {
-        log.Fatal(err)
-    }
+	if err := os.Chdir(*mountPath); err != nil {
+		log.Fatal(err)
+	}
 
-    wd, err := os.Getwd()
-    if err != nil {
-        log.Fatal(err)
-    }
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    log.Println("Updated application working directory: ", wd)
+	log.Println("Updated application working directory: ", wd)
 
-    watcher, err := fsnotify.NewWatcher()
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer watcher.Close()
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
 
-    go func() {
-        for {
-            select {
-            case event, ok := <-watcher.Events:
-                if !ok {
-                    return
-                }
-                // TODO filter out files that aren't .png / .jpeg / .txt / etc.
-                log.Println("event:", event)
-                if event.Has(fsnotify.Create) {
-                    log.Println("created file: ", event.Name)
-                    store(client, &event.Name)
-                }
-                if event.Has(fsnotify.Write) {
-                    log.Println("modified file: ", event.Name)
-                    store(client, &event.Name)
-                }
-                if event.Has(fsnotify.Remove) {
-                    log.Println("removed file: ", event.Name)
-                    deleteFile(client, &event.Name)
-                }
-            case err, ok := <-watcher.Errors:
-                if !ok {
-                    return
-                }
-                log.Println("error: ", err)
-            }
-        }
-    }()
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				// Filter out files that aren't .png / .jpeg / .txt / etc.
+				if !(strings.Contains(event.Name, ".png") ||
+					strings.Contains(event.Name, ".jpeg") ||
+					strings.Contains(event.Name, ".txt") ||
+					strings.Contains(event.Name, ".html")) {
+                    continue
+				}
+				log.Println("event:", event)
+				if event.Has(fsnotify.Create) {
+					log.Println("created file: ", event.Name)
+					store(client, &event.Name)
+				}
+				if event.Has(fsnotify.Write) {
+					log.Println("modified file: ", event.Name)
+					store(client, &event.Name)
+				}
+				if event.Has(fsnotify.Remove) {
+					log.Println("removed file: ", event.Name)
+					deleteFile(client, &event.Name)
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("error: ", err)
+			}
+		}
+	}()
 
-    err = watcher.Add(wd)
-    if err != nil {
-        log.Fatal(err)
-    }
+	err = watcher.Add(wd)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    <-make(chan struct{})
+    // TODO Client-side callbacklist functionality
+	<-make(chan struct{})
 }
 
 func getFileList(mountDir *string) []*pb.MetaData {
@@ -186,9 +193,10 @@ func list(client pb.DFSClient) {
 func deleteFile(client pb.DFSClient, filepath *string) {
 
 	log.Printf("Attempting to delete file %s", *filepath)
-    filename := getFilenameFromPath(*filepath)
-    log.Printf("Filename: %s", filename)
-	_, err := stat(client, filepath)
+	filename := getFilenameFromPath(*filepath)
+	log.Printf("Filename: %s", filename)
+
+	_, err := stat(client, &filename)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -268,26 +276,21 @@ func lock(client pb.DFSClient, filename *string) error {
 }
 
 func getFilenameFromPath(filepath string) string {
-    return filepath[strings.LastIndex(filepath, "/")+1:]
+	return filepath[strings.LastIndex(filepath, "/")+1:]
 }
 
 // store stores a client file to the dfs server
 func store(client pb.DFSClient, filepath *string) {
 
 	log.Printf("Attempting to store file %s", *filepath)
-    filename := getFilenameFromPath(*filepath)
-    log.Printf("Filename: %s", filename)
+	filename := getFilenameFromPath(*filepath)
+	log.Printf("Filename: %s", filename)
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
 	// Get local file data
 	info, err := os.Stat(filename)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Lock file
-	if err := lock(client, &filename); err != nil {
 		log.Fatal(err)
 	}
 
@@ -307,11 +310,18 @@ func store(client pb.DFSClient, filepath *string) {
 	}
 
 	if err == nil && serverFileStat.Crc == crc {
-		log.Fatalf("Client and Server have same file contents. Exiting.")
+		log.Printf("Client and Server already have same file contents, no need to store.")
+        return
 	}
 
 	if err == nil && serverFileStat.Mtime > int32(info.ModTime().Unix()) {
-		log.Fatalf("Server has more recent version of file than client. Exiting.")
+		log.Printf("Server has more recent version of file than client, aborting store operation.")
+        return
+	}
+
+	// Lock file
+	if err := lock(client, &filename); err != nil {
+		log.Fatal(err)
 	}
 
 	// Initialize request
@@ -342,7 +352,7 @@ func store(client pb.DFSClient, filepath *string) {
 	} else {
 		bufSize = int(info.Size())
 	}
-    log.Printf("Data buffer size: %d bytes", bufSize)
+	log.Printf("Data buffer size: %d bytes", bufSize)
 
 	file, err := os.Open(*filepath)
 	defer file.Close()
@@ -362,7 +372,7 @@ func store(client pb.DFSClient, filepath *string) {
 		msg := &pb.StoreRequest{RequestData: &request}
 
 		if (err == io.EOF && numBytes != 0) || len(buf) == 0 {
-            log.Printf("reached end of file, sending final %d bytes", len(buf))
+			log.Printf("reached end of file, sending final %d bytes", len(buf))
 			if err := stream.Send(msg); err != nil {
 				log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
 			}
@@ -373,7 +383,7 @@ func store(client pb.DFSClient, filepath *string) {
 			log.Fatalf("file.Read failed: %s", err)
 		}
 
-        //log.Printf("sending %d bytes", len(buf))
+		//log.Printf("sending %d bytes", len(buf))
 		if err := stream.Send(msg); err != nil {
 			log.Fatalf("client.StoreFile: stream.Send(%v) failed: %s", *msg, err)
 		}
