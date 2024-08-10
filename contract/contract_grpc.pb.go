@@ -27,7 +27,7 @@ type DFSClient interface {
 	ListFiles(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*ListResponse, error)
 	GetFileStat(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error)
 	LockFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error)
-	CallbackList(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*ListResponse, error)
+	ServerSync(ctx context.Context, opts ...grpc.CallOption) (DFS_ServerSyncClient, error)
 	DeleteFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error)
 }
 
@@ -132,13 +132,35 @@ func (c *dFSClient) LockFile(ctx context.Context, in *MetaData, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *dFSClient) CallbackList(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*ListResponse, error) {
-	out := new(ListResponse)
-	err := c.cc.Invoke(ctx, "/contract.DFS/CallbackList", in, out, opts...)
+func (c *dFSClient) ServerSync(ctx context.Context, opts ...grpc.CallOption) (DFS_ServerSyncClient, error) {
+	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[2], "/contract.DFS/ServerSync", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &dFSServerSyncClient{stream}
+	return x, nil
+}
+
+type DFS_ServerSyncClient interface {
+	Send(*MetaData) error
+	Recv() (*ListResponse, error)
+	grpc.ClientStream
+}
+
+type dFSServerSyncClient struct {
+	grpc.ClientStream
+}
+
+func (x *dFSServerSyncClient) Send(m *MetaData) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *dFSServerSyncClient) Recv() (*ListResponse, error) {
+	m := new(ListResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *dFSClient) DeleteFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error) {
@@ -159,7 +181,7 @@ type DFSServer interface {
 	ListFiles(context.Context, *MetaData) (*ListResponse, error)
 	GetFileStat(context.Context, *MetaData) (*MetaData, error)
 	LockFile(context.Context, *MetaData) (*MetaData, error)
-	CallbackList(context.Context, *MetaData) (*ListResponse, error)
+	ServerSync(DFS_ServerSyncServer) error
 	DeleteFile(context.Context, *MetaData) (*MetaData, error)
 	mustEmbedUnimplementedDFSServer()
 }
@@ -183,8 +205,8 @@ func (UnimplementedDFSServer) GetFileStat(context.Context, *MetaData) (*MetaData
 func (UnimplementedDFSServer) LockFile(context.Context, *MetaData) (*MetaData, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LockFile not implemented")
 }
-func (UnimplementedDFSServer) CallbackList(context.Context, *MetaData) (*ListResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CallbackList not implemented")
+func (UnimplementedDFSServer) ServerSync(DFS_ServerSyncServer) error {
+	return status.Errorf(codes.Unimplemented, "method ServerSync not implemented")
 }
 func (UnimplementedDFSServer) DeleteFile(context.Context, *MetaData) (*MetaData, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteFile not implemented")
@@ -303,22 +325,30 @@ func _DFS_LockFile_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DFS_CallbackList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MetaData)
-	if err := dec(in); err != nil {
+func _DFS_ServerSync_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DFSServer).ServerSync(&dFSServerSyncServer{stream})
+}
+
+type DFS_ServerSyncServer interface {
+	Send(*ListResponse) error
+	Recv() (*MetaData, error)
+	grpc.ServerStream
+}
+
+type dFSServerSyncServer struct {
+	grpc.ServerStream
+}
+
+func (x *dFSServerSyncServer) Send(m *ListResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *dFSServerSyncServer) Recv() (*MetaData, error) {
+	m := new(MetaData)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
-	if interceptor == nil {
-		return srv.(DFSServer).CallbackList(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/contract.DFS/CallbackList",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DFSServer).CallbackList(ctx, req.(*MetaData))
-	}
-	return interceptor(ctx, in, info, handler)
+	return m, nil
 }
 
 func _DFS_DeleteFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -359,10 +389,6 @@ var DFS_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DFS_LockFile_Handler,
 		},
 		{
-			MethodName: "CallbackList",
-			Handler:    _DFS_CallbackList_Handler,
-		},
-		{
 			MethodName: "DeleteFile",
 			Handler:    _DFS_DeleteFile_Handler,
 		},
@@ -377,6 +403,12 @@ var DFS_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "FetchFile",
 			Handler:       _DFS_FetchFile_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "ServerSync",
+			Handler:       _DFS_ServerSync_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "contract/contract.proto",

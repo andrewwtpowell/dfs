@@ -153,8 +153,7 @@ func mount(client pb.DFSClient, mountPath *string) {
 		log.Fatal(err)
 	}
 
-    // TODO Client-side callbacklist functionality
-	<-make(chan struct{})
+    serverSync(client)
 }
 
 func getFileList(mountDir *string) []*pb.MetaData {
@@ -277,6 +276,52 @@ func lock(client pb.DFSClient, filename *string) error {
 
 func getFilenameFromPath(filepath string) string {
 	return filepath[strings.LastIndex(filepath, "/")+1:]
+}
+
+// serverSync continuously sends requests for server updates and receives server updates
+func serverSync(client pb.DFSClient) {
+
+    log.Printf("Starting server sync")
+    ctx := context.WithoutCancel(context.Background())
+
+    stream, err := client.ServerSync(ctx)
+    st = status.Convert(err)
+    if st.Code() != codes.OK {
+        log.Fatal(st.String())
+    }
+
+    for {
+
+        // Create empty request
+        request := pb.MetaData{
+            Name:      "",
+            Size:      0,
+            Mtime:     0,
+            Crc:       0,
+            LockOwner: id,
+        }
+
+        // Send request to receive server update
+        stream.Send(&request)
+
+        response, err := stream.Recv()
+        if err != nil {
+            log.Fatalf("serverSync stream recv failed")
+        }
+
+        serverList := response.GetFileList()
+
+        // TODO Compare serverList with local fileList 
+
+        // TODO Delete local files that are not in server list
+
+        // TODO Fetch files from server that are not present locally
+
+        // TODO Store more recent local files to server - push updates
+
+        // TODO Fetch more recent server files from server - pull updates
+
+    }
 }
 
 // store stores a client file to the dfs server

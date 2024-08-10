@@ -16,7 +16,7 @@ service DFS {
 
     rpc LockFile(MetaData) returns (MetaData) {}
 
-    rpc CallbackList(MetaData) returns (ListResponse) {}
+    rpc ServerSync(stream MetaData) returns (stream ListResponse) {}
 
     rpc DeleteFile(MetaData) returns (MetaData) {}
 }
