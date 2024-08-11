@@ -124,7 +124,7 @@ func mount(client pb.DFSClient, mountPath *string) {
 					strings.Contains(event.Name, ".jpeg") ||
 					strings.Contains(event.Name, ".txt") ||
 					strings.Contains(event.Name, ".html")) {
-                    continue
+					continue
 				}
 				log.Println("event:", event)
 				if event.Has(fsnotify.Create) {
@@ -153,7 +153,7 @@ func mount(client pb.DFSClient, mountPath *string) {
 		log.Fatal(err)
 	}
 
-    serverSync(client)
+	serverSync(client)
 }
 
 func getFileList(mountDir *string) []*pb.MetaData {
@@ -279,49 +279,113 @@ func getFilenameFromPath(filepath string) string {
 }
 
 // serverSync continuously sends requests for server updates and receives server updates
-func serverSync(client pb.DFSClient) {
+func serverSync(client pb.DFSClient, mountPath *string) {
 
-    log.Printf("Starting server sync")
-    ctx := context.WithoutCancel(context.Background())
+	log.Printf("Starting server sync RPC")
+	ctx := context.WithoutCancel(context.Background())
 
-    stream, err := client.ServerSync(ctx)
-    st = status.Convert(err)
-    if st.Code() != codes.OK {
-        log.Fatal(st.String())
-    }
+	stream, err := client.ServerSync(ctx)
+	st := status.Convert(err)
+	if st.Code() != codes.OK {
+		log.Fatal(st.String())
+	}
 
-    for {
+	for {
 
-        // Create empty request
-        request := pb.MetaData{
-            Name:      "",
-            Size:      0,
-            Mtime:     0,
-            Crc:       0,
-            LockOwner: id,
-        }
+		// Create empty request
+		request := pb.MetaData{
+			Name:      "",
+			Size:      0,
+			Mtime:     0,
+			Crc:       0,
+			LockOwner: id,
+		}
 
-        // Send request to receive server update
-        stream.Send(&request)
+		// Send request to receive server update
+		stream.Send(&request)
 
-        response, err := stream.Recv()
-        if err != nil {
-            log.Fatalf("serverSync stream recv failed")
-        }
+		response, err := stream.Recv()
+		if err != nil {
+			log.Fatalf("serverSync stream recv failed")
+		}
 
-        serverList := response.GetFileList()
+		serverList := response.GetFileList()
 
-        // TODO Compare serverList with local fileList 
+		// Delete local files that are not in server list
+		localToDelete := findMissing(serverList, fileList)
+		for _, toDelete := range localToDelete {
+			log.Printf("Deleting file %s locally, not on server", *mountPath+toDelete.Name)
+			os.Remove(*mountPath + toDelete.Name)
 
-        // TODO Delete local files that are not in server list
+			// Remove entry from local list in place
+			i := 0
+			for i < len(fileList) {
+				if fileList[i].Name == toDelete.Name {
+					copy(fileList[i:], fileList[i+1:])
+					fileList = fileList[:len(fileList)-1]
+				} else {
+					i++
+				}
+			}
+		}
 
-        // TODO Fetch files from server that are not present locally
+		// Fetch files from server that are not present locally
+		missingLocally := findMissing(fileList, serverList)
+		for _, toFetch := range missingLocally {
+			log.Printf("Fetching file %s from server, missing locally", toFetch.Name)
+			fetch(client, &toFetch.Name)
+		}
 
-        // TODO Store more recent local files to server - push updates
+		// Store more recent local files to server - push updates
+		updatedLocal := findUpdated(serverList, fileList)
+		for _, toStore := range updatedLocal {
+			log.Printf("Storing file %s, client has more recent version than server")
+			store(client, &toStore.Name)
+		}
 
-        // TODO Fetch more recent server files from server - pull updates
+		// Fetch more recent server files from server - pull updates
+		updatedServer := findUpdated(fileList, serverList)
+		for _, toFetch := range updatedServer {
+			log.Printf("Fetching file %s from server, client has stale version")
+			fetch(client, &toFetch.Name)
+		}
 
-    }
+	}
+}
+
+// findUpdated returns the elements in 'compare' that are more recent compared to their equivalent in 'base'
+func findUpdated(base, compare []*pb.MetaData) []*pb.MetaData {
+
+	var updated []*pb.MetaData
+	for _, compareItem := range compare {
+		for _, baseItem := range base {
+			if compareItem.Name == baseItem.Name && compareItem.Mtime > baseItem.Mtime {
+				updated = append(updated, compareItem)
+			}
+		}
+	}
+	return updated
+}
+
+// findMissing returns the elements in 'compare' that are not in 'base'
+func findMissing(base, compare []*pb.MetaData) []*pb.MetaData {
+
+	var missing []*pb.MetaData
+	for _, compareItem := range compare {
+		found := false
+		for _, baseItem := range base {
+			if compareItem.Name == baseItem.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Printf("File %s missing from base list", compareItem.Name)
+			missing = append(missing, compareItem)
+		}
+	}
+
+	return missing
 }
 
 // store stores a client file to the dfs server
@@ -356,12 +420,12 @@ func store(client pb.DFSClient, filepath *string) {
 
 	if err == nil && serverFileStat.Crc == crc {
 		log.Printf("Client and Server already have same file contents, no need to store.")
-        return
+		return
 	}
 
 	if err == nil && serverFileStat.Mtime > int32(info.ModTime().Unix()) {
 		log.Printf("Server has more recent version of file than client, aborting store operation.")
-        return
+		return
 	}
 
 	// Lock file

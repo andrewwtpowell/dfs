@@ -26,7 +26,6 @@ type dfsServer struct {
 	pb.UnimplementedDFSServer
 	fileList   []*pb.MetaData
 	mount      string
-	queueMutex sync.Mutex
 	dataMutex  sync.Mutex
 	lockMap    map[string]string
 }
@@ -63,6 +62,15 @@ func newServer() *dfsServer {
 	s.lockMap = make(map[string]string)
 
 	return s
+}
+
+func (s *dfsServer) ServerSync(stream pb.DFS_ServerSyncServer) error {
+
+    log.Println("")
+
+    // TODO figure out how to have sync list sent every time the server is updated
+    // channels?
+    return nil
 }
 
 func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
