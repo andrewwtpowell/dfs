@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/andrewwtpowell/dfs/contract"
@@ -21,9 +22,10 @@ import (
 const deadlineTimeout = 7
 
 var (
-	server   = os.Getenv("DFS_SERVER_ADDR")
-	fileList []*pb.MetaData
-	id       string
+	server    = os.Getenv("DFS_SERVER_ADDR")
+	fileList  []*pb.MetaData
+	id        string
+	fileMutex sync.Mutex
 )
 
 func main() {
@@ -119,6 +121,7 @@ func mount(client pb.DFSClient, mountPath *string) {
 				if !ok {
 					return
 				}
+
 				// Filter out files that aren't .png / .jpeg / .txt / etc.
 				if !(strings.Contains(event.Name, ".png") ||
 					strings.Contains(event.Name, ".jpeg") ||
@@ -126,11 +129,14 @@ func mount(client pb.DFSClient, mountPath *string) {
 					strings.Contains(event.Name, ".html")) {
 					continue
 				}
+
+                if event.Has(fsnotify.Create) {
+                    continue
+                }
+
+                fileMutex.Lock()
+
 				log.Println("event:", event)
-				if event.Has(fsnotify.Create) {
-					log.Println("created file: ", event.Name)
-					store(client, &event.Name)
-				}
 				if event.Has(fsnotify.Write) {
 					log.Println("modified file: ", event.Name)
 					store(client, &event.Name)
@@ -139,6 +145,9 @@ func mount(client pb.DFSClient, mountPath *string) {
 					log.Println("removed file: ", event.Name)
 					deleteFile(client, &event.Name)
 				}
+
+                fileMutex.Unlock()
+
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -153,7 +162,7 @@ func mount(client pb.DFSClient, mountPath *string) {
 		log.Fatal(err)
 	}
 
-	serverSync(client)
+	serverSync(client, mountPath)
 }
 
 func getFileList(mountDir *string) []*pb.MetaData {
@@ -339,17 +348,16 @@ func serverSync(client pb.DFSClient, mountPath *string) {
 		// Store more recent local files to server - push updates
 		updatedLocal := findUpdated(serverList, fileList)
 		for _, toStore := range updatedLocal {
-			log.Printf("Storing file %s, client has more recent version than server")
+			log.Printf("Storing file %s, client has more recent version than server", toStore.Name)
 			store(client, &toStore.Name)
 		}
 
 		// Fetch more recent server files from server - pull updates
 		updatedServer := findUpdated(fileList, serverList)
 		for _, toFetch := range updatedServer {
-			log.Printf("Fetching file %s from server, client has stale version")
+			log.Printf("Fetching file %s from server, client has stale version", toFetch.Name)
 			fetch(client, &toFetch.Name)
 		}
-
 	}
 }
 
@@ -518,6 +526,9 @@ func fetch(client pb.DFSClient, filename *string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
+
+    fileMutex.Lock()
+    defer fileMutex.Unlock()
 
 	request := pb.MetaData{
 		Name:      *filename,

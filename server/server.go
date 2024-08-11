@@ -18,16 +18,17 @@ import (
 )
 
 var (
-	port      = flag.Int("port", 50051, "Server port")
-	mountPath = flag.String("mount", "mnt/", "Server directory to mount")
+	port          = flag.Int("port", 50051, "Server port")
+	mountPath     = flag.String("mount", "mnt/", "Server directory to mount")
+	updateChannel = make(chan int)
 )
 
 type dfsServer struct {
 	pb.UnimplementedDFSServer
-	fileList   []*pb.MetaData
-	mount      string
-	dataMutex  sync.Mutex
-	lockMap    map[string]string
+	fileList  []*pb.MetaData
+	mount     string
+	dataMutex sync.Mutex
+	lockMap   map[string]string
 }
 
 func main() {
@@ -66,19 +67,42 @@ func newServer() *dfsServer {
 
 func (s *dfsServer) ServerSync(stream pb.DFS_ServerSyncServer) error {
 
-    log.Println("")
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			errMsg := fmt.Sprintf("stream.Recv failed: %s", err)
+			log.Print(err)
+			err := status.Error(codes.Canceled, errMsg)
+			return err
+		}
 
-    // TODO figure out how to have sync list sent every time the server is updated
-    // channels?
-    return nil
+		log.Printf("ServerSync: Received server update notification request from client %s, waiting on update", msg.LockOwner)
+		<-updateChannel
+
+		s.fileList, err = shared.RefreshFileList(&s.mount)
+		if err != nil {
+			errMsg := fmt.Sprintf("shared.RefreshFileList failed: %s", err)
+			log.Print(errMsg)
+			err := status.Errorf(codes.Canceled, errMsg)
+			return err
+		}
+
+		log.Println("ServerSync: Server-side update occurred, sending updated file list to clients")
+		var response pb.ListResponse
+		response.FileList = s.fileList
+
+		stream.Send(&response)
+	}
 }
 
 func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 
 	log.Println("Processing store request")
 
-	s.dataMutex.Lock()
-	defer s.dataMutex.Unlock()
+	// Notify ServerSync function that a change to the server file list has been made
+	defer func() {
+		updateChannel <- 0
+	}()
 
 	// Process first message in stream (metadata)
 	msg, err := stream.Recv()
@@ -241,8 +265,10 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 
 	log.Printf("Received request to delete file %s", request.Name)
 
-	s.dataMutex.Lock()
-	defer s.dataMutex.Unlock()
+	// Notify ServerSync function that a change to the server file list has been made
+	defer func() {
+		updateChannel <- 0
+	}()
 
 	defer shared.RefreshFileList(&s.mount)
 
