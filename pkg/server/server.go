@@ -1,25 +1,20 @@
-package main
+package server
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"log"
-	"net"
 	"os"
 	"sync"
 
-	pb "github.com/andrewwtpowell/dfs/contract"
-	"github.com/andrewwtpowell/dfs/shared"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+	"github.com/andrewwtpowell/dfs/pkg/shared"
 )
 
 var (
-	port          = flag.Int("port", 50051, "Server port")
-	mountPath     = flag.String("mount", "mnt/", "Server directory to mount")
 	updateChannel = make(chan int)
 )
 
@@ -31,26 +26,8 @@ type dfsServer struct {
 	lockMap   map[string]string
 }
 
-func main() {
-
-	flag.Parse()
-
-	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
-	grpcServer := grpc.NewServer()
-	pb.RegisterDFSServer(grpcServer, newServer())
-
-	log.Printf("server listening at %v", listener.Addr())
-	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
-}
-
-func newServer() *dfsServer {
-	s := &dfsServer{mount: *mountPath}
+func NewServer(mnt string) *dfsServer {
+	s := &dfsServer{mount: mnt}
 	list, err := shared.RefreshFileList(&s.mount)
 	if err != nil {
 		log.Fatalf("refreshFileList: %s", err)

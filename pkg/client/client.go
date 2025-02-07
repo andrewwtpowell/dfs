@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"context"
@@ -10,12 +10,10 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/andrewwtpowell/dfs/contract"
-	"github.com/andrewwtpowell/dfs/shared"
+	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+	"github.com/andrewwtpowell/dfs/pkg/shared"
 	"github.com/fsnotify/fsnotify"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
@@ -28,74 +26,9 @@ var (
 	fileMutex sync.Mutex
 )
 
-func main() {
+func Mount(client pb.DFSClient, mountPath *string) {
 
-	if server == "" {
-		server = "localhost:50051"
-		log.Printf("DFS_SERVER_ADDR env var not set. Using default: %s", server)
-	}
-
-	name, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("os.Hostname: %s", err)
-	}
-	pid := os.Getpid()
-	id = name + fmt.Sprint(pid)
-	log.Printf("starting client %s", id)
-
-	// Connect to server
-	log.Printf("connecting to server at %s", server)
-	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("unable to connect: %s", err)
-	}
-	defer conn.Close()
-	client := pb.NewDFSClient(conn)
-
-	if len(os.Args) < 2 {
-		log.Fatal("Expected subcommand. Subcommand options are list, store, stat, delete, or fetch.")
-	}
-
-	switch os.Args[1] {
-	case "mount":
-		mountPath := os.Args[2]
-		if mountPath == "" {
-			mountPath = "mnt/"
-		}
-		fileList = getFileList(&mountPath)
-		mount(client, &mountPath)
-	case "list":
-		list(client)
-	case "store":
-		filename := os.Args[2]
-		if filename == "" {
-			log.Fatal("No file name provided for store RPC")
-		}
-		store(client, &filename)
-	case "stat":
-		filename := os.Args[2]
-		if filename == "" {
-			log.Fatalf("No file name provided for stat RPC")
-		}
-		stat(client, &filename)
-	case "delete":
-		filename := os.Args[2]
-		if filename == "" {
-			log.Fatalf("No file name provided for delete RPC")
-		}
-		deleteFile(client, &filename)
-	case "fetch":
-		filename := os.Args[2]
-		if filename == "" {
-			log.Fatalf("No file name provided for fetch RPC")
-		}
-		fetch(client, &filename)
-	default:
-		log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
-	}
-}
-
-func mount(client pb.DFSClient, mountPath *string) {
+    fileList = getFileList(mountPath)
 
 	if err := os.Chdir(*mountPath); err != nil {
 		log.Fatal(err)
@@ -139,11 +72,11 @@ func mount(client pb.DFSClient, mountPath *string) {
 				log.Println("event:", event)
 				if event.Has(fsnotify.Write) {
 					log.Println("modified file: ", event.Name)
-					store(client, &event.Name)
+					Store(client, &event.Name)
 				}
 				if event.Has(fsnotify.Remove) {
 					log.Println("removed file: ", event.Name)
-					deleteFile(client, &event.Name)
+					DeleteFile(client, &event.Name)
 				}
 
                 fileMutex.Unlock()
@@ -179,7 +112,7 @@ func getFileList(mountDir *string) []*pb.MetaData {
 }
 
 // list gets files present on the server and prints them to stdout
-func list(client pb.DFSClient) {
+func List(client pb.DFSClient) {
 
 	log.Print("Requesting list of server-side files")
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
@@ -198,13 +131,13 @@ func list(client pb.DFSClient) {
 }
 
 // deleteFile removes file from server
-func deleteFile(client pb.DFSClient, filepath *string) {
+func DeleteFile(client pb.DFSClient, filepath *string) {
 
 	log.Printf("Attempting to delete file %s", *filepath)
 	filename := getFilenameFromPath(*filepath)
 	log.Printf("Filename: %s", filename)
 
-	_, err := stat(client, &filename)
+	_, err := Stat(client, &filename)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -234,7 +167,7 @@ func deleteFile(client pb.DFSClient, filepath *string) {
 }
 
 // stat gets file statistics for a server-side file
-func stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
+func Stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
 
 	log.Printf("Requesting statistics for file %s", *filename)
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
@@ -342,21 +275,21 @@ func serverSync(client pb.DFSClient, mountPath *string) {
 		missingLocally := findMissing(fileList, serverList)
 		for _, toFetch := range missingLocally {
 			log.Printf("Fetching file %s from server, missing locally", toFetch.Name)
-			fetch(client, &toFetch.Name)
+			Fetch(client, &toFetch.Name)
 		}
 
 		// Store more recent local files to server - push updates
 		updatedLocal := findUpdated(serverList, fileList)
 		for _, toStore := range updatedLocal {
 			log.Printf("Storing file %s, client has more recent version than server", toStore.Name)
-			store(client, &toStore.Name)
+			Store(client, &toStore.Name)
 		}
 
 		// Fetch more recent server files from server - pull updates
 		updatedServer := findUpdated(fileList, serverList)
 		for _, toFetch := range updatedServer {
 			log.Printf("Fetching file %s from server, client has stale version", toFetch.Name)
-			fetch(client, &toFetch.Name)
+			Fetch(client, &toFetch.Name)
 		}
 	}
 }
@@ -397,7 +330,7 @@ func findMissing(base, compare []*pb.MetaData) []*pb.MetaData {
 }
 
 // store stores a client file to the dfs server
-func store(client pb.DFSClient, filepath *string) {
+func Store(client pb.DFSClient, filepath *string) {
 
 	log.Printf("Attempting to store file %s", *filepath)
 	filename := getFilenameFromPath(*filepath)
@@ -418,7 +351,7 @@ func store(client pb.DFSClient, filepath *string) {
 	}
 
 	// Determine if client has newer version of file
-	serverFileStat, err := stat(client, &filename)
+	serverFileStat, err := Stat(client, &filename)
 	st := status.Convert(err)
 	if st.Code() == codes.NotFound {
 		log.Printf("Caught file not found error: %s", st.String())
@@ -520,7 +453,7 @@ func store(client pb.DFSClient, filepath *string) {
 }
 
 // fetch fetches a file from the server and stores it on the client
-func fetch(client pb.DFSClient, filename *string) {
+func Fetch(client pb.DFSClient, filename *string) {
 
 	log.Printf("Requesting file %s from server", *filename)
 

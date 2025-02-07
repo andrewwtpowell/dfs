@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-option go_package = "dfs/contract/contract";
+option go_package = "dfs/api/dfs_api";
 
-package contract;
+package dfs_api;
 
 service DFS {
 

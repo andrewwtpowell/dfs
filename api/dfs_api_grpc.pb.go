@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v4.25.1
-// source: contract/contract.proto
+// source: api/dfs_api.proto
 
-package contract
+package dfs_api
 
 import (
 	context "context"
@@ -40,7 +40,7 @@ func NewDFSClient(cc grpc.ClientConnInterface) DFSClient {
 }
 
 func (c *dFSClient) StoreFile(ctx context.Context, opts ...grpc.CallOption) (DFS_StoreFileClient, error) {
-	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[0], "/contract.DFS/StoreFile", opts...)
+	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[0], "/dfs_api.DFS/StoreFile", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (x *dFSStoreFileClient) CloseAndRecv() (*MetaData, error) {
 }
 
 func (c *dFSClient) FetchFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (DFS_FetchFileClient, error) {
-	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[1], "/contract.DFS/FetchFile", opts...)
+	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[1], "/dfs_api.DFS/FetchFile", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (x *dFSFetchFileClient) Recv() (*FetchResponse, error) {
 
 func (c *dFSClient) ListFiles(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*ListResponse, error) {
 	out := new(ListResponse)
-	err := c.cc.Invoke(ctx, "/contract.DFS/ListFiles", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/dfs_api.DFS/ListFiles", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (c *dFSClient) ListFiles(ctx context.Context, in *MetaData, opts ...grpc.Ca
 
 func (c *dFSClient) GetFileStat(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error) {
 	out := new(MetaData)
-	err := c.cc.Invoke(ctx, "/contract.DFS/GetFileStat", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/dfs_api.DFS/GetFileStat", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (c *dFSClient) GetFileStat(ctx context.Context, in *MetaData, opts ...grpc.
 
 func (c *dFSClient) LockFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error) {
 	out := new(MetaData)
-	err := c.cc.Invoke(ctx, "/contract.DFS/LockFile", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/dfs_api.DFS/LockFile", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (c *dFSClient) LockFile(ctx context.Context, in *MetaData, opts ...grpc.Cal
 }
 
 func (c *dFSClient) ServerSync(ctx context.Context, opts ...grpc.CallOption) (DFS_ServerSyncClient, error) {
-	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[2], "/contract.DFS/ServerSync", opts...)
+	stream, err := c.cc.NewStream(ctx, &DFS_ServiceDesc.Streams[2], "/dfs_api.DFS/ServerSync", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (x *dFSServerSyncClient) Recv() (*ListResponse, error) {
 
 func (c *dFSClient) DeleteFile(ctx context.Context, in *MetaData, opts ...grpc.CallOption) (*MetaData, error) {
 	out := new(MetaData)
-	err := c.cc.Invoke(ctx, "/contract.DFS/DeleteFile", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/dfs_api.DFS/DeleteFile", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func _DFS_ListFiles_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/contract.DFS/ListFiles",
+		FullMethod: "/dfs_api.DFS/ListFiles",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DFSServer).ListFiles(ctx, req.(*MetaData))
@@ -299,7 +299,7 @@ func _DFS_GetFileStat_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/contract.DFS/GetFileStat",
+		FullMethod: "/dfs_api.DFS/GetFileStat",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DFSServer).GetFileStat(ctx, req.(*MetaData))
@@ -317,7 +317,7 @@ func _DFS_LockFile_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/contract.DFS/LockFile",
+		FullMethod: "/dfs_api.DFS/LockFile",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DFSServer).LockFile(ctx, req.(*MetaData))
@@ -361,7 +361,7 @@ func _DFS_DeleteFile_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/contract.DFS/DeleteFile",
+		FullMethod: "/dfs_api.DFS/DeleteFile",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DFSServer).DeleteFile(ctx, req.(*MetaData))
@@ -373,7 +373,7 @@ func _DFS_DeleteFile_Handler(srv interface{}, ctx context.Context, dec func(inte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var DFS_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "contract.DFS",
+	ServiceName: "dfs_api.DFS",
 	HandlerType: (*DFSServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -411,5 +411,5 @@ var DFS_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "contract/contract.proto",
+	Metadata: "api/dfs_api.proto",
 }

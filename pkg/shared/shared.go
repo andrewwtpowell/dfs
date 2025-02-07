@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	pb "github.com/andrewwtpowell/dfs/contract"
+	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
 )
 
 const (
