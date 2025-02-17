@@ -9,26 +9,65 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+    "github.com/fsnotify/fsnotify"
+    "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/status"
 
-	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+    "github.com/andrewwtpowell/dfs/api"
 	"github.com/andrewwtpowell/dfs/pkg/shared"
-	"github.com/fsnotify/fsnotify"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const deadlineTimeout = 7
 
-var (
-	server    = os.Getenv("DFS_SERVER_ADDR")
-	fileList  []*pb.MetaData
-	id        string
-	fileMutex sync.Mutex
-)
+type dfsClient struct {
+    grpcClient dfs_api.DFSClient
+    grpcConn *grpc.ClientConn
+    fileList []*dfs_api.MetaData
+    id string
+    fileMutex sync.Mutex
+}
 
-func Mount(client pb.DFSClient, mountPath *string) {
+func Init(serverAddr string) (*dfsClient, error) {
 
-    fileList = getFileList(mountPath)
+	if serverAddr == "" {
+		serverAddr = "localhost:50051"
+		log.Printf("Server address not specified. Using default: %s", serverAddr)
+	}
+
+	name, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("os.Hostname failure: %s", err)
+	}
+	pid := os.Getpid()
+	id := name + fmt.Sprint(pid)
+	log.Printf("starting client %s", id)
+
+	// Connect to server
+	log.Printf("connecting to server at %s", serverAddr)
+	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+        return nil, fmt.Errorf("Unable to connect: %s", err)
+	}
+	grpcClient := dfs_api.NewDFSClient(conn)
+
+    return &dfsClient {
+        grpcClient: grpcClient,
+        grpcConn: conn,
+        id: id,
+        fileList: nil,
+    }, nil
+
+}
+
+func (c *dfsClient) Shutdown() {
+    c.grpcConn.Close()
+}
+
+func (c *dfsClient) Mount(mountPath *string) {
+
+    c.fileList = getFileList(mountPath)
 
 	if err := os.Chdir(*mountPath); err != nil {
 		log.Fatal(err)
@@ -67,19 +106,19 @@ func Mount(client pb.DFSClient, mountPath *string) {
                     continue
                 }
 
-                fileMutex.Lock()
+                c.fileMutex.Lock()
 
 				log.Println("event:", event)
 				if event.Has(fsnotify.Write) {
 					log.Println("modified file: ", event.Name)
-					Store(client, &event.Name)
+					c.Store(&event.Name)
 				}
 				if event.Has(fsnotify.Remove) {
 					log.Println("removed file: ", event.Name)
-					DeleteFile(client, &event.Name)
+					c.DeleteFile(&event.Name)
 				}
 
-                fileMutex.Unlock()
+                c.fileMutex.Unlock()
 
 			case err, ok := <-watcher.Errors:
 				if !ok {
@@ -95,10 +134,10 @@ func Mount(client pb.DFSClient, mountPath *string) {
 		log.Fatal(err)
 	}
 
-	serverSync(client, mountPath)
+	c.serverSync(mountPath)
 }
 
-func getFileList(mountDir *string) []*pb.MetaData {
+func getFileList(mountDir *string) []*dfs_api.MetaData {
 
 	log.Printf("updating file list with files at %s", *mountDir)
 	fileList, err := shared.RefreshFileList(mountDir)
@@ -112,14 +151,14 @@ func getFileList(mountDir *string) []*pb.MetaData {
 }
 
 // list gets files present on the server and prints them to stdout
-func List(client pb.DFSClient) {
+func (c *dfsClient) List() {
 
 	log.Print("Requesting list of server-side files")
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
-	request := pb.MetaData{Name: ""}
-	list, err := client.ListFiles(ctx, &request)
+	request := dfs_api.MetaData{Name: ""}
+	list, err := c.grpcClient.ListFiles(ctx, &request)
 	if err != nil {
 		log.Fatalf("client.ListFiles failed: %s", err)
 	}
@@ -131,19 +170,19 @@ func List(client pb.DFSClient) {
 }
 
 // deleteFile removes file from server
-func DeleteFile(client pb.DFSClient, filepath *string) {
+func (c *dfsClient) DeleteFile(filepath *string) {
 
 	log.Printf("Attempting to delete file %s", *filepath)
 	filename := getFilenameFromPath(*filepath)
 	log.Printf("Filename: %s", filename)
 
-	_, err := Stat(client, &filename)
+	_, err := c.Stat(&filename)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
 	}
 
-	err = lock(client, &filename)
+	err = c.lock(&filename)
 	st = status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -152,12 +191,12 @@ func DeleteFile(client pb.DFSClient, filepath *string) {
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
-	request := pb.MetaData{
+	request := dfs_api.MetaData{
 		Name:      filename,
-		LockOwner: id,
+		LockOwner: c.id,
 	}
 
-	_, err = client.DeleteFile(ctx, &request)
+	_, err = c.grpcClient.DeleteFile(ctx, &request)
 	st = status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -167,18 +206,18 @@ func DeleteFile(client pb.DFSClient, filepath *string) {
 }
 
 // stat gets file statistics for a server-side file
-func Stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
+func (c *dfsClient) Stat(filename *string) (*dfs_api.MetaData, error) {
 
 	log.Printf("Requesting statistics for file %s", *filename)
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
-	request := pb.MetaData{
+	request := dfs_api.MetaData{
 		Name:      *filename,
-		LockOwner: id,
+		LockOwner: c.id,
 	}
 
-	fileStat, err := client.GetFileStat(ctx, &request)
+	fileStat, err := c.grpcClient.GetFileStat(ctx, &request)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Print(st.String())
@@ -191,25 +230,25 @@ func Stat(client pb.DFSClient, filename *string) (*pb.MetaData, error) {
 }
 
 // lock attempts to lock a dfs file for editing
-func lock(client pb.DFSClient, filename *string) error {
+func (c *dfsClient) lock(filename *string) error {
 
 	log.Printf("Attempting to lock file %s", *filename)
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
-	request := pb.MetaData{
+	request := dfs_api.MetaData{
 		Name:      *filename,
-		LockOwner: id,
+		LockOwner: c.id,
 	}
 
-	response, err := client.LockFile(ctx, &request)
+	response, err := c.grpcClient.LockFile(ctx, &request)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Print(st.String())
 		return st.Err()
 	}
 
-	if response.LockOwner == id {
+	if response.LockOwner == c.id {
 		log.Printf("%s locked successfully", *filename)
 	}
 
@@ -221,12 +260,12 @@ func getFilenameFromPath(filepath string) string {
 }
 
 // serverSync continuously sends requests for server updates and receives server updates
-func serverSync(client pb.DFSClient, mountPath *string) {
+func (c *dfsClient) serverSync(mountPath *string) {
 
 	log.Printf("Starting server sync RPC")
 	ctx := context.WithoutCancel(context.Background())
 
-	stream, err := client.ServerSync(ctx)
+	stream, err := c.grpcClient.ServerSync(ctx)
 	st := status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -235,12 +274,12 @@ func serverSync(client pb.DFSClient, mountPath *string) {
 	for {
 
 		// Create empty request
-		request := pb.MetaData{
+		request := dfs_api.MetaData{
 			Name:      "",
 			Size:      0,
 			Mtime:     0,
 			Crc:       0,
-			LockOwner: id,
+			LockOwner: c.id,
 		}
 
 		// Send request to receive server update
@@ -254,17 +293,17 @@ func serverSync(client pb.DFSClient, mountPath *string) {
 		serverList := response.GetFileList()
 
 		// Delete local files that are not in server list
-		localToDelete := findMissing(serverList, fileList)
+		localToDelete := findMissing(serverList, c.fileList)
 		for _, toDelete := range localToDelete {
 			log.Printf("Deleting file %s locally, not on server", *mountPath+toDelete.Name)
 			os.Remove(*mountPath + toDelete.Name)
 
 			// Remove entry from local list in place
 			i := 0
-			for i < len(fileList) {
-				if fileList[i].Name == toDelete.Name {
-					copy(fileList[i:], fileList[i+1:])
-					fileList = fileList[:len(fileList)-1]
+			for i < len(c.fileList) {
+				if c.fileList[i].Name == toDelete.Name {
+					copy(c.fileList[i:], c.fileList[i+1:])
+					c.fileList = c.fileList[:len(c.fileList)-1]
 				} else {
 					i++
 				}
@@ -272,32 +311,32 @@ func serverSync(client pb.DFSClient, mountPath *string) {
 		}
 
 		// Fetch files from server that are not present locally
-		missingLocally := findMissing(fileList, serverList)
+		missingLocally := findMissing(c.fileList, serverList)
 		for _, toFetch := range missingLocally {
 			log.Printf("Fetching file %s from server, missing locally", toFetch.Name)
-			Fetch(client, &toFetch.Name)
+			c.Fetch(&toFetch.Name)
 		}
 
 		// Store more recent local files to server - push updates
-		updatedLocal := findUpdated(serverList, fileList)
+		updatedLocal := findUpdated(serverList, c.fileList)
 		for _, toStore := range updatedLocal {
 			log.Printf("Storing file %s, client has more recent version than server", toStore.Name)
-			Store(client, &toStore.Name)
+			c.Store(&toStore.Name)
 		}
 
 		// Fetch more recent server files from server - pull updates
-		updatedServer := findUpdated(fileList, serverList)
+		updatedServer := findUpdated(c.fileList, serverList)
 		for _, toFetch := range updatedServer {
 			log.Printf("Fetching file %s from server, client has stale version", toFetch.Name)
-			Fetch(client, &toFetch.Name)
+			c.Fetch(&toFetch.Name)
 		}
 	}
 }
 
 // findUpdated returns the elements in 'compare' that are more recent compared to their equivalent in 'base'
-func findUpdated(base, compare []*pb.MetaData) []*pb.MetaData {
+func findUpdated(base, compare []*dfs_api.MetaData) []*dfs_api.MetaData {
 
-	var updated []*pb.MetaData
+	var updated []*dfs_api.MetaData
 	for _, compareItem := range compare {
 		for _, baseItem := range base {
 			if compareItem.Name == baseItem.Name && compareItem.Mtime > baseItem.Mtime {
@@ -309,9 +348,9 @@ func findUpdated(base, compare []*pb.MetaData) []*pb.MetaData {
 }
 
 // findMissing returns the elements in 'compare' that are not in 'base'
-func findMissing(base, compare []*pb.MetaData) []*pb.MetaData {
+func findMissing(base, compare []*dfs_api.MetaData) []*dfs_api.MetaData {
 
-	var missing []*pb.MetaData
+	var missing []*dfs_api.MetaData
 	for _, compareItem := range compare {
 		found := false
 		for _, baseItem := range base {
@@ -330,7 +369,7 @@ func findMissing(base, compare []*pb.MetaData) []*pb.MetaData {
 }
 
 // store stores a client file to the dfs server
-func Store(client pb.DFSClient, filepath *string) {
+func (c *dfsClient) Store(filepath *string) {
 
 	log.Printf("Attempting to store file %s", *filepath)
 	filename := getFilenameFromPath(*filepath)
@@ -351,7 +390,7 @@ func Store(client pb.DFSClient, filepath *string) {
 	}
 
 	// Determine if client has newer version of file
-	serverFileStat, err := Stat(client, &filename)
+	serverFileStat, err := c.Stat(&filename)
 	st := status.Convert(err)
 	if st.Code() == codes.NotFound {
 		log.Printf("Caught file not found error: %s", st.String())
@@ -370,24 +409,24 @@ func Store(client pb.DFSClient, filepath *string) {
 	}
 
 	// Lock file
-	if err := lock(client, &filename); err != nil {
+	if err := c.lock(&filename); err != nil {
 		log.Fatal(err)
 	}
 
 	// Initialize request
-	metadata := pb.MetaData{
+	metadata := dfs_api.MetaData{
 		Name:      filename,
 		Size:      int32(info.Size()),
 		Mtime:     int32(info.ModTime().Unix()),
 		Crc:       crc,
-		LockOwner: id,
+		LockOwner: c.id,
 	}
-	request := pb.StoreRequest_Metadata{
+	request := dfs_api.StoreRequest_Metadata{
 		Metadata: &metadata,
 	}
-	msg := &pb.StoreRequest{RequestData: &request}
+	msg := &dfs_api.StoreRequest{RequestData: &request}
 
-	stream, err := client.StoreFile(ctx)
+	stream, err := c.grpcClient.StoreFile(ctx)
 	st = status.Convert(err)
 	if st.Code() != codes.OK {
 		log.Fatal(st.String())
@@ -418,8 +457,8 @@ func Store(client pb.DFSClient, filepath *string) {
 			break
 		}
 
-		request := pb.StoreRequest_Content{Content: buf}
-		msg := &pb.StoreRequest{RequestData: &request}
+		request := dfs_api.StoreRequest_Content{Content: buf}
+		msg := &dfs_api.StoreRequest{RequestData: &request}
 
 		if (err == io.EOF && numBytes != 0) || len(buf) == 0 {
 			log.Printf("reached end of file, sending final %d bytes", len(buf))
@@ -453,21 +492,21 @@ func Store(client pb.DFSClient, filepath *string) {
 }
 
 // fetch fetches a file from the server and stores it on the client
-func Fetch(client pb.DFSClient, filename *string) {
+func (c *dfsClient) Fetch(filename *string) {
 
 	log.Printf("Requesting file %s from server", *filename)
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineTimeout*time.Second)
 	defer cancel()
 
-    fileMutex.Lock()
-    defer fileMutex.Unlock()
+    c.fileMutex.Lock()
+    defer c.fileMutex.Unlock()
 
-	request := pb.MetaData{
+	request := dfs_api.MetaData{
 		Name:      *filename,
-		LockOwner: id,
+		LockOwner: c.id,
 	}
-	stream, err := client.FetchFile(ctx, &request)
+	stream, err := c.grpcClient.FetchFile(ctx, &request)
 	if err != nil {
 		log.Fatalf("client.FetchFile failed: %s", err)
 	}

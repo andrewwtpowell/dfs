@@ -6,14 +6,14 @@ import (
 	"log"
 	"os"
 
-	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+    "github.com/andrewwtpowell/dfs/api"
 )
 
 const (
 	MaxBufSize = 4190000
 )
 
-func RefreshFileList(mountDir *string) ([]*pb.MetaData, error) {
+func RefreshFileList(mountDir *string) ([]*dfs_api.MetaData, error) {
 
 	byteDir := []rune(*mountDir)
 	if byteDir[len(byteDir)-1] != '/' {
@@ -33,7 +33,7 @@ func RefreshFileList(mountDir *string) ([]*pb.MetaData, error) {
 	}
 
 	// Allocate capacity for new list based on number of files in dir
-	fileList := make([]*pb.MetaData, 0, len(files))
+	fileList := make([]*dfs_api.MetaData, 0, len(files))
 
 	for _, file := range files {
 
@@ -45,7 +45,7 @@ func RefreshFileList(mountDir *string) ([]*pb.MetaData, error) {
 		filePath := *mountDir + file.Name()
 
 		// Initialize MetaData object and add to list
-		var newFileEntry pb.MetaData
+		var newFileEntry dfs_api.MetaData
 		newFileEntry.Name = file.Name()
 
 		fileInfo, err := file.Info()
@@ -68,13 +68,13 @@ func RefreshFileList(mountDir *string) ([]*pb.MetaData, error) {
 	return fileList, nil
 }
 
-func PrintFileList(list *[]*pb.MetaData) {
+func PrintFileList(list *[]*dfs_api.MetaData) {
 	for _, data := range *list {
 		PrintFileInfo(data)
 	}
 }
 
-func PrintFileInfo(data *pb.MetaData) {
+func PrintFileInfo(data *dfs_api.MetaData) {
 	fmt.Printf("%v\n", data.Name)
 	fmt.Printf("size:\t%v\n", data.Size)
 	fmt.Printf("mtime:\t%v\n", data.Mtime)

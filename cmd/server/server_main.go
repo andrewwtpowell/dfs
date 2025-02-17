@@ -7,7 +7,7 @@ import (
     "fmt"
 	"google.golang.org/grpc"
 
-	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+    "github.com/andrewwtpowell/dfs/api"
     "github.com/andrewwtpowell/dfs/pkg/server"
 )
 
@@ -26,7 +26,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterDFSServer(grpcServer, server.NewServer(*mountPath))
+	dfs_api.RegisterDFSServer(grpcServer, server.NewServer(*mountPath))
 
 	log.Printf("server listening at %v", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {

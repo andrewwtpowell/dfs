@@ -1,13 +1,9 @@
 package main
 
 import (
-	"fmt"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"os"
 
-	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
 	"github.com/andrewwtpowell/dfs/pkg/client"
 )
 
@@ -17,27 +13,13 @@ var (
 
 func main() {
 
-	if server == "" {
-		server = "localhost:50051"
-		log.Printf("DFS_SERVER_ADDR env var not set. Using default: %s", server)
-	}
+    dfsClient, err := client.Init(server)
+    if err != nil {
+        log.Fatalf("Failure initializing client: %v", err)
+    }
 
-	name, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("os.Hostname: %s", err)
-	}
-	pid := os.Getpid()
-	id := name + fmt.Sprint(pid)
-	log.Printf("starting client %s", id)
+    defer dfsClient.Shutdown()
 
-	// Connect to server
-	log.Printf("connecting to server at %s", server)
-	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("unable to connect: %s", err)
-	}
-	defer conn.Close()
-	dfsClient := pb.NewDFSClient(conn)
 
 	if len(os.Args) < 2 {
 		log.Fatal("Expected subcommand. Subcommand options are list, store, stat, delete, or fetch.")
@@ -49,33 +31,33 @@ func main() {
 		if mountPath == "" {
 			mountPath = "mnt/"
 		}
-		client.Mount(dfsClient, &mountPath)
+		dfsClient.Mount(&mountPath)
 	case "list":
-		client.List(dfsClient)
+		dfsClient.List()
 	case "store":
 		filename := os.Args[2]
 		if filename == "" {
 			log.Fatal("No file name provided for store RPC")
 		}
-		client.Store(dfsClient, &filename)
+		dfsClient.Store(&filename)
 	case "stat":
 		filename := os.Args[2]
 		if filename == "" {
 			log.Fatalf("No file name provided for stat RPC")
 		}
-		client.Stat(dfsClient, &filename)
+		dfsClient.Stat(&filename)
 	case "delete":
 		filename := os.Args[2]
 		if filename == "" {
 			log.Fatalf("No file name provided for delete RPC")
 		}
-		client.DeleteFile(dfsClient, &filename)
+		dfsClient.DeleteFile(&filename)
 	case "fetch":
 		filename := os.Args[2]
 		if filename == "" {
 			log.Fatalf("No file name provided for fetch RPC")
 		}
-		client.Fetch(dfsClient, &filename)
+		dfsClient.Fetch(&filename)
 	default:
 		log.Fatal("Invalid subcommand. Expected list, store, stat, delete, or fetch.")
 	}

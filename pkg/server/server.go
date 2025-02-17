@@ -10,7 +10,7 @@ import (
 	"os"
 	"sync"
 
-	pb "github.com/andrewwtpowell/dfs/api/dfs_api"
+    "github.com/andrewwtpowell/dfs/api"
 	"github.com/andrewwtpowell/dfs/pkg/shared"
 )
 
@@ -19,8 +19,8 @@ var (
 )
 
 type dfsServer struct {
-	pb.UnimplementedDFSServer
-	fileList  []*pb.MetaData
+	dfs_api.UnimplementedDFSServer
+	fileList  []*dfs_api.MetaData
 	mount     string
 	dataMutex sync.Mutex
 	lockMap   map[string]string
@@ -42,7 +42,7 @@ func NewServer(mnt string) *dfsServer {
 	return s
 }
 
-func (s *dfsServer) ServerSync(stream pb.DFS_ServerSyncServer) error {
+func (s *dfsServer) ServerSync(stream dfs_api.DFS_ServerSyncServer) error {
 
 	for {
 		msg, err := stream.Recv()
@@ -65,14 +65,14 @@ func (s *dfsServer) ServerSync(stream pb.DFS_ServerSyncServer) error {
 		}
 
 		log.Println("ServerSync: Server-side update occurred, sending updated file list to clients")
-		var response pb.ListResponse
+		var response dfs_api.ListResponse
 		response.FileList = s.fileList
 
 		stream.Send(&response)
 	}
 }
 
-func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
+func (s *dfsServer) StoreFile(stream dfs_api.DFS_StoreFileServer) error {
 
 	log.Println("Processing store request")
 
@@ -125,7 +125,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 			log.Printf("Server file contents match stored file - updating modification time for file %s", metadata.Name)
 			file.Mtime = metadata.Mtime
 
-			return stream.SendAndClose(&pb.MetaData{
+			return stream.SendAndClose(&dfs_api.MetaData{
 				Name:      file.Name,
 				Size:      file.Size,
 				Mtime:     file.Mtime,
@@ -189,7 +189,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 				}
 			}
 
-			return stream.SendAndClose(&pb.MetaData{
+			return stream.SendAndClose(&dfs_api.MetaData{
 				Name:      info.Name(),
 				Size:      int32(info.Size()),
 				Mtime:     int32(info.ModTime().Unix()),
@@ -223,7 +223,7 @@ func (s *dfsServer) StoreFile(stream pb.DFS_StoreFileServer) error {
 	}
 }
 
-func (s *dfsServer) ListFiles(ctx context.Context, request *pb.MetaData) (*pb.ListResponse, error) {
+func (s *dfsServer) ListFiles(ctx context.Context, request *dfs_api.MetaData) (*dfs_api.ListResponse, error) {
 
 	log.Printf("Received request for file list")
 
@@ -231,14 +231,14 @@ func (s *dfsServer) ListFiles(ctx context.Context, request *pb.MetaData) (*pb.Li
 	defer s.dataMutex.Unlock()
 
 	log.Printf("File list contains %d files", len(s.fileList))
-	var response pb.ListResponse
+	var response dfs_api.ListResponse
 	response.FileList = s.fileList
 
 	log.Printf("Response list contains %d files", len(response.FileList))
 	return &response, nil
 }
 
-func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+func (s *dfsServer) DeleteFile(ctx context.Context, request *dfs_api.MetaData) (*dfs_api.MetaData, error) {
 
 	log.Printf("Received request to delete file %s", request.Name)
 
@@ -286,7 +286,7 @@ func (s *dfsServer) DeleteFile(ctx context.Context, request *pb.MetaData) (*pb.M
 	return nil, err
 }
 
-func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServer) error {
+func (s *dfsServer) FetchFile(request *dfs_api.MetaData, stream dfs_api.DFS_FetchFileServer) error {
 
 	log.Printf("Client %s requesting file %s", request.LockOwner, request.Name)
 	shared.PrintFileList(&s.fileList)
@@ -312,14 +312,14 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
 		return st
 	}
 
-	metadata := pb.MetaData{
+	metadata := dfs_api.MetaData{
 		Name:  request.Name,
 		Size:  int32(fileInfo.Size()),
 		Mtime: int32(fileInfo.ModTime().Unix()),
 		Crc:   crc,
 	}
-	response := pb.FetchResponse_Metadata{Metadata: &metadata}
-	msg := pb.FetchResponse{ResponseData: &response}
+	response := dfs_api.FetchResponse_Metadata{Metadata: &metadata}
+	msg := dfs_api.FetchResponse{ResponseData: &response}
 
 	stream.Send(&msg)
 
@@ -348,8 +348,8 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
 			return nil
 		}
 
-		response := pb.FetchResponse_Content{Content: buf}
-		msg := &pb.FetchResponse{ResponseData: &response}
+		response := dfs_api.FetchResponse_Content{Content: buf}
+		msg := &dfs_api.FetchResponse{ResponseData: &response}
 
 		if err == io.EOF && numBytes != 0 {
 			if err := stream.Send(msg); err != nil {
@@ -377,7 +377,7 @@ func (s *dfsServer) FetchFile(request *pb.MetaData, stream pb.DFS_FetchFileServe
 	}
 }
 
-func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+func (s *dfsServer) GetFileStat(ctx context.Context, request *dfs_api.MetaData) (*dfs_api.MetaData, error) {
 
 	log.Printf("Client %s requesting info for file %s", request.LockOwner, request.Name)
 	shared.PrintFileList(&s.fileList)
@@ -388,7 +388,7 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
 
 		if file.Name == request.Name {
 			log.Printf("Found file %s", request.Name)
-			response := &pb.MetaData{
+			response := &dfs_api.MetaData{
 				Name:      file.Name,
 				Size:      file.Size,
 				Mtime:     file.Mtime,
@@ -407,7 +407,7 @@ func (s *dfsServer) GetFileStat(ctx context.Context, request *pb.MetaData) (*pb.
 	return nil, err
 }
 
-func (s *dfsServer) LockFile(ctx context.Context, request *pb.MetaData) (*pb.MetaData, error) {
+func (s *dfsServer) LockFile(ctx context.Context, request *dfs_api.MetaData) (*dfs_api.MetaData, error) {
 
 	log.Printf("Client %s attempting to lock file %s", request.LockOwner, request.Name)
 

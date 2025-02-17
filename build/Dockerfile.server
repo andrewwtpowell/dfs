@@ -1,0 +1,11 @@
+FROM golang:latest AS builder
+
+COPY . /app
+WORKDIR /app
+RUN go mod download && go mod verify
+RUN CGO_ENABLED=0 go build -ldflags="-extldflags=-static -s -w" -o build/server_main cmd/server/server_main.go
+
+FROM alpine:latest
+COPY --from=builder /app/build/server_main /server_main
+
+ENTRYPOINT ["/server_main"]
